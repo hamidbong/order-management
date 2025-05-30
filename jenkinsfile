@@ -1,0 +1,106 @@
+pipeline {
+  agent any
+  environment {
+    DOCKERHUB_CREDENTIALS = 'dockerhub-credentials'
+    DOCKERHUB_REPO = 'hamidbong/webapp'
+  }
+  parameters {
+    choice(name: 'SERVICE', choices: ['service-node', 'service-java'], description: 'Sélectionnez le microservice à builder')
+  }
+  stages {
+    stage('Checkout') {
+      steps {
+        script {
+          checkout scm
+        }
+      }
+    }
+    
+    stage('Build') {
+      steps {
+        script {
+          if (params.SERVICE == 'service-node') {
+            dir('service-node') {
+              sh 'npm install'
+              sh 'npm run build'
+            }
+          } else if (params.SERVICE == 'service-java') {
+            dir('service-java') {
+              sh 'mvn clean package'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Test') {
+      steps {
+        script {
+          if (params.SERVICE == 'service-node') {
+            dir('service-node') {
+              sh 'npm test'
+            }
+          } else if (params.SERVICE == 'service-java') {
+            dir('service-java') {
+              sh 'mvn test'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Security Scan') {
+      agent {
+        docker {
+          image 'aquasec/trivy:latest'
+          args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+      }
+      steps {
+        script {
+          def imageTag = "${DOCKERHUB_REPO}:${env.SERVICE}-${env.BUILD_NUMBER}"
+          sh "docker build -t ${imageTag} ."
+          sh "trivy image ${imageTag} || true"
+        }
+      }
+    }
+
+    stage('Docker Build & Push') {
+      steps {
+        script {
+          def imageTag = "${DOCKERHUB_REPO}:${env.SERVICE}-${env.BUILD_NUMBER}"
+
+          docker.withRegistry('https://index.docker.io/v1/', "${DOCKERHUB_CREDENTIALS}") {
+            dir("${env.SERVICE}") {
+              sh "docker build -t ${imageTag} ."
+              sh "docker push ${imageTag}"
+            }
+          }
+          echo "Image poussée : ${imageTag}"
+        }
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        script {
+          withCredentials([file(credentialsId: 'KUBECONFIG_PROD', variable: 'KUBECONFIG')]) {
+            sh """
+              export KUBECONFIG=$KUBECONFIG
+              helm upgrade --install ${params.SERVICE} ./helm-chart \
+                --set image.repository=${DOCKER_REGISTRY}/${params.SERVICE} \
+                --set image.tag=${IMAGE_TAG} \
+                --namespace mynamespace \
+                --kube-context=${KUBE_CONTEXT}
+            """
+          }
+        }
+      }
+    }
+  }
+  post {
+    always {
+      cleanWs()
+    }
+  }
+}
