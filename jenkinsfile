@@ -25,7 +25,7 @@ pipeline {
               sh 'npm run build'
             }
           } else if (params.SERVICE == 'user-service') {
-            dir('service-java') {
+            dir('user-service') {
               sh 'mvn clean package'
             }
           }
