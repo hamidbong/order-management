@@ -17,15 +17,13 @@ pipeline {
     }
 
     stage('Checkout & Détection des changements') {
-      steps {
-        script {
-          // Récupère les fichiers modifiés via Git
-          def changes = getGitChanges()
-          // Détermine quels microservices ont été modifiés
-          env.MODIFIED_SERVICES = detectModifiedServices(changes)
+            steps {
+                script {  // <-- Bloc script obligatoire pour les fonctions personnalisées
+                    def changes = getGitChanges()  // Appel de la fonction
+                    env.MODIFIED_SERVICES = detectModifiedServices(changes)
+                }
+            }
         }
-      }
-    }
 
     stage('Préparation') {
             steps {
