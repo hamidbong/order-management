@@ -18,8 +18,10 @@ pipeline {
 
     stage('Checkout & Détection des changements') {
             steps {
-                script {  // <-- Bloc script obligatoire pour les fonctions personnalisées
-                    def changes = getGitChanges()  // Appel de la fonction
+                script {
+                    // Récupère les fichiers modifiés via Git
+                    def changes = getGitChanges()
+                    // Détermine quels microservices ont été modifiés
                     env.MODIFIED_SERVICES = detectModifiedServices(changes)
                 }
             }
@@ -132,4 +134,10 @@ pipeline {
       cleanWs()
     }
   }
+}
+def getGitChanges() {
+    def changes = []
+    def gitDiff = sh(script: "git diff --name-only HEAD HEAD~1", returnStdout: true)
+    changes = gitDiff.split('\n')
+    return changes
 }
