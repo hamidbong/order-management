@@ -5,7 +5,7 @@ pipeline {
     DOCKERHUB_REPO = 'hamidbong/webapp'
   }
   parameters {
-    choice(name: 'SERVICE', choices: ['service-node', 'service-java'], description: 'Sélectionnez le microservice à builder')
+    choice(name: 'SERVICE', choices: ['order-service', 'user-service'], description: 'Sélectionnez le microservice à builder')
   }
   stages {
     stage('Checkout') {
@@ -19,12 +19,12 @@ pipeline {
     stage('Build') {
       steps {
         script {
-          if (params.SERVICE == 'service-node') {
-            dir('service-node') {
+          if (params.SERVICE == 'order-service') {
+            dir('order-service') {
               sh 'npm install'
               sh 'npm run build'
             }
-          } else if (params.SERVICE == 'service-java') {
+          } else if (params.SERVICE == 'user-service') {
             dir('service-java') {
               sh 'mvn clean package'
             }
@@ -36,11 +36,11 @@ pipeline {
     stage('Test') {
       steps {
         script {
-          if (params.SERVICE == 'service-node') {
-            dir('service-node') {
+          if (params.SERVICE == 'order-service') {
+            dir('order-service') {
               sh 'npm test'
             }
-          } else if (params.SERVICE == 'service-java') {
+          } else if (params.SERVICE == 'user-service') {
             dir('service-java') {
               sh 'mvn test'
             }
