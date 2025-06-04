@@ -3,9 +3,10 @@ pipeline {
 
   stages {
     stage('Checkout') {
-            steps {
-                checkout scm  // This pulls your Git repository
-            }
+        steps {
+            checkout scm  // This pulls your Git repository
+        }
+    }
 
     stage('Build') {
         steps {
