@@ -2,6 +2,11 @@ pipeline {
   agent any
 
   stages {
+    stage('Checkout') {
+            steps {
+                checkout scm  // This pulls your Git repository
+            }
+            
     stage('Build') {
         steps {
             echo "🔨 Build de ServiceA"
