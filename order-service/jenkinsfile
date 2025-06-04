@@ -5,8 +5,10 @@ pipeline {
     stage('Build') {
       steps {
         echo "🔨 Build de ServiceA"
-        npm install
-        npm run build
+        script {
+            sh 'npm install'
+            sh 'npm run build'
+        }
       }
     }
     stage('Tests') {
