@@ -6,13 +6,16 @@ pipeline {
             steps {
                 checkout scm  // This pulls your Git repository
             }
-            
+
     stage('Build') {
         steps {
             echo "🔨 Build de ServiceA"
-            sh 'npm install'
+            dir('order-service') {  // Change to the subdirectory
+                sh 'npm install'
+            }
         }
     }
+
     stage('Tests') {
       steps {
         echo "🧪 Tests de ServiceA"
