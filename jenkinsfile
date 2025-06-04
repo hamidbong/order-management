@@ -15,7 +15,7 @@ pipeline {
         }
       }
     }
-
+    
     stage('Préparation') {
       steps {
         script {
@@ -52,7 +52,7 @@ pipeline {
       }
     }
 
-    stage('Préparation') {
+    /*stage('Préparation') {
             steps {
                 script {
                     // Détection des changements dans chaque microservice
@@ -71,7 +71,7 @@ pipeline {
                     echo "Services modifiés : ${CHANGED_SERVICES}"
                 }
             }
-        }
+        }*/
     stage('Build') {
       steps {
         script {
