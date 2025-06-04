@@ -5,11 +5,8 @@ pipeline {
     stage('Build') {
       steps {
         echo "🔨 Build de ServiceA"
-        // Ton build spécifique ici
-        /*dir('order-service') {
-            sh 'npm install'
-            sh 'npm run build'
-        }*/
+        sh 'npm install'
+        sh 'npm run build'
       }
     }
     stage('Tests') {

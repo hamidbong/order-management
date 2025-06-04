@@ -4,9 +4,9 @@ pipeline {
     DOCKERHUB_CREDENTIALS = 'dockerhub-credentials'
     DOCKERHUB_REPO = 'hamidbong/webapp'
   }
-  parameters {
+  /*parameters {
     choice(name: 'SERVICE', choices: ['order-service', 'user-service'], description: 'Sélectionnez le microservice à builder')
-  }
+  }*/
   stages {
     stage('Checkout') {
       steps {
@@ -67,8 +67,8 @@ pipeline {
         }
       }
     }
-    
-    stage('Build') {
+
+    /*stage('Build') {
       steps {
         script {
           if (params.SERVICE == 'order-service') {
@@ -148,7 +148,7 @@ pipeline {
           }
         }
       }
-    }
+    }*/
   }
   post {
     always {
