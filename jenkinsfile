@@ -31,7 +31,7 @@ pipeline {
           def affectedServices = []
 
           // Liste de tes services dans le monorepo
-          def services = ['order-service', 'user-service']
+          def services = ['order-service', 'user-servic']
 
           // Vérifie si un fichier modifié appartient à un des services
           changedFiles.each { file ->
