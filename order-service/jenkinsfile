@@ -9,9 +9,9 @@ pipeline {
 
     stage('Build') {
         steps {
-            echo "🔨 Build de ServiceA"
-            dir('order-service') {  // Change to the subdirectory
-                sh 'npm install'
+            dir('order-service') {
+              sh 'npm install'
+              sh 'npm run build'
             }
         }
     }
