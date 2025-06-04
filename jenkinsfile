@@ -52,26 +52,22 @@ pipeline {
       }
     }
 
-    /*stage('Préparation') {
-            steps {
-                script {
-                    // Détection des changements dans chaque microservice
-                    CHANGED_SERVICES = []
+    stage('Déclencher les pipelines des services') {
+      steps {
+        script {
+          def affectedServices = env.AFFECTED_SERVICES.split(',')
 
-                    // Vérifie chaque répertoire pour voir s’il y a eu des changements
-                    def services = ['order-service', 'user-service']
-                    for (service in services) {
-                        def changes = sh(script: "git diff --name-only origin/main...HEAD ${service}", returnStdout: true).trim()
-                        if (changes) {
-                            CHANGED_SERVICES.add(service)
-                        }
-                    }
+          affectedServices.each { service ->
+            echo "🚀 Déclenchement du pipeline pour ${service}"
 
-                    // Log des services modifiés
-                    echo "Services modifiés : ${CHANGED_SERVICES}"
-                }
-            }
-        }*/
+            // Appelle le pipeline Jenkins du service
+            // Assure-toi que les jobs Jenkins pour chaque service sont bien créés avec les bons noms !
+            build job: "${service}", wait: false
+          }
+        }
+      }
+    }
+    
     stage('Build') {
       steps {
         script {
