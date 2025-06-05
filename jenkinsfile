@@ -12,12 +12,26 @@ pipeline {
         script {
           def stateFile = "${env.STATE_FILE}"
           if (fileExists(stateFile)) {
+            def jsonText = readFile(stateFile).trim()
+            if (jsonText) {
+              buildState = new groovy.json.JsonSlurperClassic().parseText(jsonText)
+              } else {
+                buildState = [:]  // Initialise l’état vide si le fichier est vide
+                }
+                } else {
+                  buildState = [:]  // Initialise l’état vide si le fichier n’existe pas
+                  }
+
+
+
+          /*def stateFile = "${env.STATE_FILE}"
+          if (fileExists(stateFile)) {
             def jsonText = readFile(stateFile)
             buildState = new groovy.json.JsonSlurperClassic().parseText(jsonText)
           } else {
             // Initialise l’état vide
             buildState = [:]
-          }
+          }*/
           echo "💾 État précédent : ${buildState}"
           env.BUILD_STATE = groovy.json.JsonOutput.toJson(buildState)
         }
