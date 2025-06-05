@@ -86,9 +86,9 @@ pipeline {
             echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
             def buildResult = build job: "${service}/main",
-                                     wait: true,
-                                     propagate: false,
-                                     parameters: []
+                                     wait: true,      // Attend la fin du build
+                                     propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
+                                     parameters: []    // Tu peux passer des paramètres si besoin
 
             echo "🔎 Résultat du job ${service} : ${buildResult.result}"
             buildResults[service] = buildResult.result
