@@ -85,7 +85,7 @@ pipeline {
           affectedServices.each { service ->
             echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
-            def buildResult = build job: "${service}",
+            def buildResult = build job: "${service}/main",
                                      wait: true,
                                      propagate: false,
                                      parameters: []
