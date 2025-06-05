@@ -1,40 +1,42 @@
 pipeline {
   agent any
+
   environment {
-    DOCKERHUB_CREDENTIALS = 'dockerhub-credentials'
-    DOCKERHUB_REPO = 'hamidbong/webapp'
     SERVICES = 'order-service,user-service'
+    STATE_FILE = '.build-state.json'
   }
-  /*parameters {
-    choice(name: 'SERVICE', choices: ['order-service', 'user-service'], description: 'Sélectionnez le microservice à builder')
-  }*/
+
   stages {
-    stage('Checkout') {
+    stage('Lire l\'état précédent') {
       steps {
         script {
-          checkout scm
+          def stateFile = "${env.STATE_FILE}"
+          if (fileExists(stateFile)) {
+            def jsonText = readFile(stateFile)
+            buildState = new groovy.json.JsonSlurperClassic().parseText(jsonText)
+          } else {
+            // Initialise l’état vide
+            buildState = [:]
+          }
+          echo "💾 État précédent : ${buildState}"
+          env.BUILD_STATE = groovy.json.JsonOutput.toJson(buildState)
         }
       }
     }
-    
+
     stage('Préparation') {
       steps {
         script {
-          // Liste les fichiers modifiés entre la précédente et la nouvelle révision
           def changedFiles = sh(
             script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
             returnStdout: true
           ).trim().split('\n')
 
-          echo "Fichiers modifiés : ${changedFiles}"
+          echo "🔍 Fichiers modifiés : ${changedFiles}"
 
-          // Initialise la liste des services affectés
           def affectedServices = []
-
-          // Liste de tes services dans le monorepo
-          //def services = ['order-service', 'user-service']
           def services = env.SERVICES.split(',')
-          // Vérifie si un fichier modifié appartient à un des services
+
           changedFiles.each { file ->
             services.each { service ->
               if (file.startsWith("${service}/")) {
@@ -43,35 +45,50 @@ pipeline {
             }
           }
 
-          // Supprime les doublons (au cas où)
           affectedServices = affectedServices.unique()
-          echo "Services impactés : ${affectedServices}"
 
-          // Partage la liste pour les autres étapes
+          // Ajoute les services en échec au build même si pas de modif
+          def previousState = new groovy.json.JsonSlurperClassic().parseText(env.BUILD_STATE)
+          services.each { service ->
+            if (previousState[service] == 'FAILURE' && !affectedServices.contains(service)) {
+              echo "⚠️ Ajout du service ${service} car il a échoué précédemment."
+              affectedServices << service
+            }
+          }
+
+          echo "🚀 Services à builder : ${affectedServices}"
           env.AFFECTED_SERVICES = affectedServices.join(',')
         }
       }
     }
+
     stage('Déclencher les jobs') {
       steps {
         script {
           def affectedServices = env.AFFECTED_SERVICES.split(',')
-          def buildResults = [:]  // Map pour stocker les résultats des builds
+          def buildResults = [:]
 
           affectedServices.each { service ->
             echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
-            // Lancement du build du sous-job
-            def buildResult = build job: "${service}/main",
-                                     wait: true,      // Attend la fin du build
-                                     propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
-                                     parameters: []    // Tu peux passer des paramètres si besoin
-            
-            echo "🔎 Résultat du job ${service} : ${buildResult.result}"
+            def buildResult = build job: "${service}",
+                                     wait: true,
+                                     propagate: false,
+                                     parameters: []
 
-            // Stocker le résultat
+            echo "🔎 Résultat du job ${service} : ${buildResult.result}"
             buildResults[service] = buildResult.result
           }
+
+          // Mettre à jour l'état global
+          def updatedState = new groovy.json.JsonSlurperClassic().parseText(env.BUILD_STATE)
+          buildResults.each { service, result ->
+            updatedState[service] = result
+          }
+
+          // Écrire l'état dans le fichier JSON
+          writeFile file: "${env.STATE_FILE}", text: groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(updatedState))
+          archiveArtifacts artifacts: "${env.STATE_FILE}", fingerprint: true
 
           // Vérifier si un build a échoué
           def hasFailure = buildResults.values().any { it != 'SUCCESS' }
@@ -83,110 +100,17 @@ pipeline {
         }
       }
     }
-
-    
-
-    /*stage('Déclencher les pipelines des services') {
-      steps {
-        script {
-          def affectedServices = env.AFFECTED_SERVICES.split(',')
-
-          affectedServices.each { service ->
-            echo "🚀 Déclenchement du pipeline pour ${service}"
-
-            // Appelle le pipeline Jenkins du service
-            // Assure-toi que les jobs Jenkins pour chaque service sont bien créés avec les bons noms !
-            build job: "${service}", wait: false
-          }
-        }
-      }
-    }*/
-
-    /*stage('Build') {
-      steps {
-        script {
-          if (params.SERVICE == 'order-service') {
-            dir('order-service') {
-              sh 'npm install'
-              sh 'npm run build'
-            }
-          } else if (params.SERVICE == 'user-service') {
-            dir('user-service') {
-              sh 'mvn clean package'
-            }
-          }
-        }
-      }
-    }
-
-    stage('Test') {
-      steps {
-        script {
-          if (params.SERVICE == 'order-service') {
-            dir('order-service') {
-              sh 'npm test'
-            }
-          } else if (params.SERVICE == 'user-service') {
-            dir('service-java') {
-              sh 'mvn test'
-            }
-          }
-        }
-      }
-    }
-
-    stage('Security Scan') {
-      agent {
-        docker {
-          image 'aquasec/trivy:latest'
-          args '-v /var/run/docker.sock:/var/run/docker.sock'
-        }
-      }
-      steps {
-        script {
-          def imageTag = "${DOCKERHUB_REPO}:${env.SERVICE}-${env.BUILD_NUMBER}"
-          sh "docker build -t ${imageTag} ."
-          sh "trivy image ${imageTag} || true"
-        }
-      }
-    }
-
-    stage('Docker Build & Push') {
-      steps {
-        script {
-          def imageTag = "${DOCKERHUB_REPO}:${env.SERVICE}-${env.BUILD_NUMBER}"
-
-          docker.withRegistry('https://index.docker.io/v1/', "${DOCKERHUB_CREDENTIALS}") {
-            dir("${env.SERVICE}") {
-              sh "docker build -t ${imageTag} ."
-              sh "docker push ${imageTag}"
-            }
-          }
-          echo "Image poussée : ${imageTag}"
-        }
-      }
-    }
-
-    stage('Deploy') {
-      steps {
-        script {
-          withCredentials([file(credentialsId: 'KUBECONFIG_PROD', variable: 'KUBECONFIG')]) {
-            sh """
-              export KUBECONFIG=$KUBECONFIG
-              helm upgrade --install ${params.SERVICE} ./helm-chart \
-                --set image.repository=${DOCKER_REGISTRY}/${params.SERVICE} \
-                --set image.tag=${IMAGE_TAG} \
-                --namespace mynamespace \
-                --kube-context=${KUBE_CONTEXT}
-            """
-          }
-        }
-      }
-    }*/
   }
+
   post {
     always {
-      cleanWs()
+      echo "🏁 Pipeline orchestrateur terminé."
+    }
+    failure {
+      echo "❌ Pipeline orchestrateur échoué."
+    }
+    success {
+      echo "✅ Pipeline orchestrateur réussi."
     }
   }
 }

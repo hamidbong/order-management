@@ -16,14 +16,15 @@ pipeline {
             }
         }
     }
-
+        
     stage('Tests') {
       steps {
-        echo "🧪 Tests de ServiceA"
-        // Tes tests ici
-        
+        dir('order-service') {
+          sh 'npm test'
+        }
       }
     }
+    
     stage('Déploiement') {
       steps {
         echo "🚀 Déploiement de ServiceA"
