@@ -66,7 +66,7 @@ pipeline {
                                      wait: true,      // Attend la fin du build
                                      propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
                                      parameters: []    // Tu peux passer des paramètres si besoin*/
-            build job: "order-service", wait: true, propagate: false
+            build job: "order-service/main", wait: true, propagate: false
             echo "🔎 Résultat du job ${service} : ${buildResult.result}"
 
             // Stocker le résultat
