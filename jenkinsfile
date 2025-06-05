@@ -3,6 +3,7 @@ pipeline {
   environment {
     DOCKERHUB_CREDENTIALS = 'dockerhub-credentials'
     DOCKERHUB_REPO = 'hamidbong/webapp'
+    SERVICES = 'order-service,user-service'
   }
   /*parameters {
     choice(name: 'SERVICE', choices: ['order-service', 'user-service'], description: 'Sélectionnez le microservice à builder')
@@ -31,8 +32,8 @@ pipeline {
           def affectedServices = []
 
           // Liste de tes services dans le monorepo
-          def services = ['order-service', 'user-service']
-
+          //def services = ['order-service', 'user-service']
+          def services = env.SERVICES.split(',')
           // Vérifie si un fichier modifié appartient à un des services
           changedFiles.each { file ->
             services.each { service ->
@@ -51,8 +52,41 @@ pipeline {
         }
       }
     }
+    stage('Déclencher les jobs') {
+      steps {
+        script {
+          def affectedServices = env.AFFECTED_SERVICES.split(',')
+          def buildResults = [:]  // Map pour stocker les résultats des builds
 
-    stage('Déclencher les pipelines des services') {
+          affectedServices.each { service ->
+            echo "🚀 Déclenchement du job Jenkins pour ${service}"
+
+            // Lancement du build du sous-job
+            def buildResult = build job: "${service}",
+                                     wait: true,      // Attend la fin du build
+                                     propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
+                                     parameters: []    // Tu peux passer des paramètres si besoin
+
+            echo "🔎 Résultat du job ${service} : ${buildResult.result}"
+
+            // Stocker le résultat
+            buildResults[service] = buildResult.result
+          }
+
+          // Vérifier si un build a échoué
+          def hasFailure = buildResults.values().any { it != 'SUCCESS' }
+          if (hasFailure) {
+            error("❌ Un ou plusieurs sous-jobs ont échoué : ${buildResults}")
+          } else {
+            echo "✅ Tous les jobs ont réussi : ${buildResults}"
+          }
+        }
+      }
+    }
+
+    
+
+    /*stage('Déclencher les pipelines des services') {
       steps {
         script {
           def affectedServices = env.AFFECTED_SERVICES.split(',')
@@ -66,7 +100,7 @@ pipeline {
           }
         }
       }
-    }
+    }*/
 
     /*stage('Build') {
       steps {
