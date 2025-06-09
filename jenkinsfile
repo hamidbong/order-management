@@ -5,41 +5,42 @@ pipeline {
     STATE_FILE = '.build-state.json'
   }
   stages {
-
     stage('Préparation') {
       steps {
         script {
-          def changedFiles = sh(
-            script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
-            returnStdout: true
-          ).trim().split('\n')
+          // Initialiser la liste des services modifiés
+          def changedFiles = []
+          try {
+            changedFiles = sh(
+              script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
+              returnStdout: true
+            ).trim().split('\n')
+          } catch (Exception e) {
+            echo "⚠️ Impossible de détecter les changements: ${e.message}"
+          }
 
           echo "🔍 Fichiers modifiés : ${changedFiles}"
 
-          def affectedServices = []
-          def services = env.SERVICES.split(',')
+          // Convertir la liste des services en List Groovy
+          def services = env.SERVICES.split(',').toList()
 
-          changedFiles.each { file ->
-            services.each { service ->
-              if (file.startsWith("${service}/")) {
-                affectedServices << service
-              }
-            }
+          // Détecter les services affectés
+          def affectedServices = services.findAll { service ->
+            changedFiles.any { file -> file.startsWith("${service}/") }
           }
 
-          affectedServices = affectedServices.unique()
+          // Ajouter les services en échec
+          def failedServices = []
+          if (fileExists('failed_services.txt')) {
+            failedServices = readFile('failed_services.txt').split('\n').toList()
+            failedServices.removeAll { it.trim().isEmpty() } // Nettoyer les lignes vides
+          }
 
-          /*// Ajoute les services en échec au build même si pas de modif
-          def previousState = new groovy.json.JsonSlurperClassic().parseText(env.BUILD_STATE)
-          services.each { service ->
-            if (previousState[service] == 'FAILURE' && !affectedServices.contains(service)) {
-              echo "⚠️ Ajout du service ${service} car il a échoué précédemment."
-              affectedServices << service
-            }
-          }*/
+          // Combiner les listes et éliminer les doublons
+          def allServicesToBuild = (affectedServices + failedServices).toUnique()
 
-          echo "🚀 Services à builder : ${affectedServices}"
-          env.AFFECTED_SERVICES = affectedServices.join(',')
+          echo "🚀 Services à builder : ${allServicesToBuild}"
+          env.AFFECTED_SERVICES = allServicesToBuild.join(',')
         }
       }
     }
@@ -47,28 +48,19 @@ pipeline {
     stage('Build Microservices') {
       steps {
         script {
-          // Lire les services précédemment en échec
-          def affectedServices = env.AFFECTED_SERVICES.split(',')
-
-          def failedServices = []
-          if (fileExists('failed_services.txt')) {
-            failedServices = readFile('failed_services.txt').split('\n')
-          }
-          // Détecter les services modifiés (votre logique actuelle)
-          //def changedServices = detectChangedServices()
-                
-          // Combiner les deux listes (sans doublons)
-          def servicesToBuild = (failedServices + affectedServices).unique()
-                    
-          // Lancer les builds
+          def servicesToBuild = env.AFFECTED_SERVICES.split(',').toList()
+          
           servicesToBuild.each { service ->
-            try {
-              build job: "build-${service}", wait: false
-              // Si succès, retirer du fichier d'échec si présent
-              removeFromFailedFile(service)
-            } catch (e) {
-                // Si échec, ajouter au fichier d'échec
+            service = service.trim() // Nettoyer les espaces
+            if (service) { // Vérifier que le nom n'est pas vide
+              try {
+                echo "🏗️ Building service: ${service}"
+                build job: "build-${service}", wait: false
+                removeFromFailedFile(service)
+              } catch (Exception e) {
+                echo "❌ Échec du build pour ${service}: ${e.message}"
                 addToFailedFile(service)
+              }
             }
           }
         }
@@ -76,18 +68,30 @@ pipeline {
     }
   }
     
-    post {
-      failure {
-        echo "❌ Pipeline orchestrateur échoué."
+  post {
+    failure {
+      echo "❌ Pipeline orchestrateur échoué."
+    }
+    always {
+      echo "📝 État des builds:"
+      script {
+        if (fileExists('failed_services.txt')) {
+          def failedServices = readFile('failed_services.txt')
+          echo "Services en échec:\n${failedServices}"
+        } else {
+          echo "Aucun service en échec"
+        }
       }
     }
+  }
 }
 
 // Fonctions utilitaires
 def addToFailedFile(service) {
     def failedServices = []
     if (fileExists('failed_services.txt')) {
-        failedServices = readFile('failed_services.txt').split('\n')
+        failedServices = readFile('failed_services.txt').split('\n').toList()
+        failedServices.removeAll { it.trim().isEmpty() } // Nettoyer les lignes vides
     }
     if (!failedServices.contains(service)) {
         writeFile file: 'failed_services.txt', text: "${failedServices.join('\n')}\n${service}".trim()
@@ -96,8 +100,9 @@ def addToFailedFile(service) {
 
 def removeFromFailedFile(service) {
     if (fileExists('failed_services.txt')) {
-        def failedServices = readFile('failed_services.txt').split('\n')
+        def failedServices = readFile('failed_services.txt').split('\n').toList()
+        failedServices.removeAll { it.trim().isEmpty() } // Nettoyer les lignes vides
         failedServices = failedServices - service
-        writeFile file: 'failed_services.txt', text: failedServices.join('\n')
+        writeFile file: 'failed_services.txt', text: failedServices.join('\n').trim()
     }
 }
