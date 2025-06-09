@@ -90,6 +90,13 @@ pipeline {
           }
 
         }
+        script {
+          if (buildResults.values().any { it == 'FAILURE' }) {
+            currentBuild.result = 'FAILURE'
+            echo "❌ Des builds ont échoué."
+          }
+        }
+
       }
     }
   }
@@ -98,7 +105,17 @@ pipeline {
     failure {
       echo "❌ Pipeline orchestrateur échoué."
     }
+
     always {
+      echo "📝 Résumé des builds:"
+      script {
+        buildResults.each { service, result ->
+          echo "🔎 ${service} : ${result}"
+        }
+      }
+    }
+
+    /*always {
       echo "📝 État des builds:"
       script {
         if (fileExists('failed_services.txt')) {
@@ -108,7 +125,7 @@ pipeline {
           echo "Aucun service en échec"
         }
       }
-    }
+    }*/
   }
 }
 
