@@ -65,7 +65,7 @@ pipeline {
               buildResults[service] = buildResult.result
               if (buildResult.result == 'FAILURE') {
                 addToFailedFile(service, env.STATE_FILE)
-                echo "✅ Ajouté à ${stateFile} : ${service}"
+                echo "✅ Ajouté à ${env.STATE_FILE} : ${service}"
 
                 echo "🔎 ${service} ajouté au fichier des services échoués."
               } else {

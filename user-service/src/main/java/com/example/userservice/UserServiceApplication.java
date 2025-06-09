@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 public class UserServiceApplication {
     public static void main(String[] args) {
-        System.out.println("boneddeeeerrrrrejftrrr");
+        System.out.println("boneddeeegggerrrrrejftrrr");
         SpringApplication.run(UserServiceApplication.class, args);
     }
 }
