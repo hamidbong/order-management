@@ -65,7 +65,9 @@ pipeline {
               }
             }
           }*/
+
           servicesToBuild.each { service ->
+           if (service) {
             echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
             def buildResult = build job: "${service}/main",
@@ -75,6 +77,8 @@ pipeline {
 
             echo "🔎 Résultat du job ${service} : ${buildResult.result}"
             buildResults[service] = buildResult.result
+           }
+            
           }
 
         }
