@@ -9,6 +9,7 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
+          buildResults = [:]  // Reset à chaque exécution
           // Initialiser la liste des services modifiés
           def changedFiles = []
           try {
