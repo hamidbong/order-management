@@ -26,5 +26,5 @@ app.post('/orders', (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`order-service listening attfsssssft http://localhost:${port}`);
+  console.log(`order-service listening attfsssft http://localhost:${port}`);
 });
