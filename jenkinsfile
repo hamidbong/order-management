@@ -2,7 +2,7 @@ pipeline {
   agent any
   environment {
     SERVICES = 'order-service,user-service'
-    STATE_FILE = '.build-state.json'
+    //STATE_FILE = '.build-state.json'
     STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
   }
   stages {
