@@ -4,7 +4,7 @@ pipeline {
   agent any
   environment {
     SERVICES = 'order-service,user-service'
-    env.STATE_FILE = ".failed_services_main.txt"
+    STATE_FILE = ".failed_services_main.txt"
   }
   stages {
     stage('Préparation') {
