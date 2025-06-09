@@ -1,32 +1,6 @@
 pipeline {
   agent any
-
-  environment {
-    SERVICES = 'order-service,user-service'
-    STATE_FILE = '.build-state.json'
-  }
-
   stages {
-    stage('Lire l\'état précédent') {
-      steps {
-        script {
-          def stateFile = "${env.STATE_FILE}"
-          if (fileExists(stateFile)) {
-            def jsonText = readFile(stateFile).trim()
-            if (jsonText) {
-              buildState = new groovy.json.JsonSlurperClassic().parseText(jsonText)
-              } else {
-                buildState = [:]  // Initialise l’état vide si le fichier est vide
-                }
-                } else {
-                  buildState = [:]  // Initialise l’état vide si le fichier n’existe pas
-                  }
-
-          echo "💾 État précédent : ${buildState}"
-          env.BUILD_STATE = groovy.json.JsonOutput.toJson(buildState)
-        }
-      }
-    }
 
     stage('Préparation') {
       steps {
@@ -51,7 +25,7 @@ pipeline {
 
           affectedServices = affectedServices.unique()
 
-          // Ajoute les services en échec au build même si pas de modif
+          /*// Ajoute les services en échec au build même si pas de modif
           def previousState = new groovy.json.JsonSlurperClassic().parseText(env.BUILD_STATE)
           services.each { service ->
             if (previousState[service] == 'FAILURE' && !affectedServices.contains(service)) {
@@ -61,60 +35,63 @@ pipeline {
           }
 
           echo "🚀 Services à builder : ${affectedServices}"
-          env.AFFECTED_SERVICES = affectedServices.join(',')
+          env.AFFECTED_SERVICES = affectedServices.join(',')*/
         }
       }
     }
-
-    stage('Déclencher les jobs') {
+    
+    stage('Build Microservices') {
       steps {
         script {
-          def affectedServices = env.AFFECTED_SERVICES.split(',')
-          def buildResults = [:]
-
-          affectedServices.each { service ->
-            echo "🚀 Déclenchement du job Jenkins pour ${service}"
-
-            def buildResult = build job: "${service}/main",
-                                     wait: true,      // Attend la fin du build
-                                     propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
-                                     parameters: []    // Tu peux passer des paramètres si besoin
-
-            echo "🔎 Résultat du job ${service} : ${buildResult.result}"
-            buildResults[service] = buildResult.result
+          // Lire les services précédemment en échec
+          def failedServices = []
+          if (fileExists('failed_services.txt')) {
+            failedServices = readFile('failed_services.txt').split('\n')
           }
-
-          // Mettre à jour l'état global
-          def updatedState = new groovy.json.JsonSlurperClassic().parseText(env.BUILD_STATE)
-          buildResults.each { service, result ->
-            updatedState[service] = result
-          }
-
-          // Écrire l'état dans le fichier JSON
-          writeFile file: "${env.STATE_FILE}", text: groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(updatedState))
-          archiveArtifacts artifacts: "${env.STATE_FILE}", fingerprint: true
-
-          // Vérifier si un build a échoué
-          def hasFailure = buildResults.values().any { it != 'SUCCESS' }
-          if (hasFailure) {
-            error("❌ Un ou plusieurs sous-jobs ont échoué : ${buildResults}")
-          } else {
-            echo "✅ Tous les jobs ont réussi : ${buildResults}"
+          // Détecter les services modifiés (votre logique actuelle)
+          //def changedServices = detectChangedServices()
+                
+          // Combiner les deux listes (sans doublons)
+          def servicesToBuild = (failedServices + affectedServices).unique()
+                    
+          // Lancer les builds
+          servicesToBuild.each { service ->
+            try {
+              build job: "build-${service}", wait: false
+              // Si succès, retirer du fichier d'échec si présent
+              removeFromFailedFile(service)
+            } catch (e) {
+                // Si échec, ajouter au fichier d'échec
+                addToFailedFile(service)
+            }
           }
         }
       }
     }
   }
+    
+    post {
+        failure {
+            // Gestion des échecs globaux
+        }
+    }
+}
 
-  post {
-    always {
-      echo "🏁 Pipeline orchestrateur terminé."
+// Fonctions utilitaires
+def addToFailedFile(service) {
+    def failedServices = []
+    if (fileExists('failed_services.txt')) {
+        failedServices = readFile('failed_services.txt').split('\n')
     }
-    failure {
-      echo "❌ Pipeline orchestrateur échoué."
+    if (!failedServices.contains(service)) {
+        writeFile file: 'failed_services.txt', text: "${failedServices.join('\n')}\n${service}".trim()
     }
-    success {
-      echo "✅ Pipeline orchestrateur réussi."
+}
+
+def removeFromFailedFile(service) {
+    if (fileExists('failed_services.txt')) {
+        def failedServices = readFile('failed_services.txt').split('\n')
+        failedServices = failedServices - service
+        writeFile file: 'failed_services.txt', text: failedServices.join('\n')
     }
-  }
 }
