@@ -19,7 +19,7 @@ pipeline {
         }
       }
     }
-    stage('Préparation') {
+    /*stage('Préparation') {
       steps {
         script {
           env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
@@ -56,6 +56,37 @@ pipeline {
 
           echo "🚀 Services à builder : ${allServicesToBuild}"
           env.AFFECTED_SERVICES = allServicesToBuild.join(',')
+        }
+      }
+    }*/
+    stage('Préparation') {
+      steps {
+        script {
+          env.STATE_FILE = "${env.WORKSPACE}/.failed_services_${env.BRANCH_NAME}.txt"
+          
+          echo "=== INFORMATIONS SUR LE FICHIER ==="
+          echo "Chemin complet: ${env.STATE_FILE}"
+          echo "Répertoire parent: ${new File(env.STATE_FILE).getParent()}"
+          
+          // Vérification des permissions
+          sh """
+            echo "Contenu du répertoire:"
+            ls -la ${env.WORKSPACE}
+            echo "Permissions:"
+            ls -ld ${env.WORKSPACE}
+            echo "Utilisateur:"
+            whoami
+          """
+          
+          // Création test du fichier
+          try {
+            writeFile file: env.STATE_FILE, text: "# Fichier test\n"
+            echo "✅ Test d'écriture réussi"
+          } catch (Exception e) {
+            echo "❌ Échec de l'écriture test: ${e.message}"
+            currentBuild.result = 'FAILURE'
+            error("Impossible d'écrire dans le fichier")
+          }
         }
       }
     }
