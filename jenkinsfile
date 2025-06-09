@@ -19,7 +19,7 @@ pipeline {
         }
       }
     }
-    /*stage('Préparation') {
+    stage('Préparation') {
       steps {
         script {
           env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
@@ -56,37 +56,6 @@ pipeline {
 
           echo "🚀 Services à builder : ${allServicesToBuild}"
           env.AFFECTED_SERVICES = allServicesToBuild.join(',')
-        }
-      }
-    }*/
-    stage('Préparation') {
-      steps {
-        script {
-          env.STATE_FILE = "${env.WORKSPACE}/.failed_services_${env.BRANCH_NAME}.txt"
-          
-          echo "=== INFORMATIONS SUR LE FICHIER ==="
-          echo "Chemin complet: ${env.STATE_FILE}"
-          echo "Répertoire parent: ${new File(env.STATE_FILE).getParent()}"
-          
-          // Vérification des permissions
-          sh """
-            echo "Contenu du répertoire:"
-            ls -la ${env.WORKSPACE}
-            echo "Permissions:"
-            ls -ld ${env.WORKSPACE}
-            echo "Utilisateur:"
-            whoami
-          """
-          
-          // Création test du fichier
-          try {
-            writeFile file: env.STATE_FILE, text: "# Fichier test\n"
-            echo "✅ Test d'écriture réussi"
-          } catch (Exception e) {
-            echo "❌ Échec de l'écriture test: ${e.message}"
-            currentBuild.result = 'FAILURE'
-            error("Impossible d'écrire dans le fichier")
-          }
         }
       }
     }
@@ -146,7 +115,7 @@ pipeline {
 }
 
 // Fonctions utilitaires
-def addToFailedFile(service, stateFile) {
+/*def addToFailedFile(service, stateFile) {
   def failedServices = [] as Set
   if (fileExists(stateFile)) {
     failedServices = readFile(stateFile).split('\n')
@@ -155,6 +124,41 @@ def addToFailedFile(service, stateFile) {
   }
   if (!failedServices.contains(service)) {
     writeFile file: stateFile, text: (failedServices + service).toList().join('\n').trim()
+  }
+}*/
+def addToFailedFile(service, stateFile) {
+  try {
+    echo "=== TENTATIVE D'AJOUT ==="
+    echo "Service: ${service}"
+    echo "Fichier: ${stateFile}"
+    
+    def failedServices = [] as Set
+    if (fileExists(stateFile)) {
+      echo "Fichier existant détecté, lecture..."
+      def content = readFile(stateFile)
+      echo "Contenu actuel: ${content}"
+      failedServices = content.split('\n')
+        .collect { it.trim() }
+        .findAll { it } as Set
+    } else {
+      echo "Fichier n'existe pas encore, création..."
+    }
+    
+    if (!failedServices.contains(service)) {
+      echo "Ajout du service ${service}"
+      def newContent = (failedServices + service).toList().join('\n').trim()
+      echo "Nouveau contenu: ${newContent}"
+      writeFile file: stateFile, text: newContent
+      echo "✅ Écriture réussie"
+    } else {
+      echo "Service déjà présent, pas d'ajout nécessaire"
+    }
+  } catch (Exception e) {
+    echo "❌ ERREUR CRITIQUE: ${e.getClass().getName()}"
+    echo "Message: ${e.message}"
+    echo "Stack trace:"
+    e.printStackTrace()
+    error("Échec de l'ajout au fichier")
   }
 }
 
