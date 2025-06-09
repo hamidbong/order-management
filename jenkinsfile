@@ -9,7 +9,8 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
-          env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
+          //env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
+          env.STATE_FILE = ".failed_services_main.txt"
 
           buildResults.clear()
 
