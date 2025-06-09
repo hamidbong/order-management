@@ -50,6 +50,7 @@ pipeline {
       steps {
         script {
           def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
+           def buildResults = [:]  // 🛠️ Ajout de cette ligne pour initialiser buildResults
           
 
 
