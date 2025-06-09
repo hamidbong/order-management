@@ -102,7 +102,6 @@ pipeline {
 
 // Fonctions utilitaires
 def addToFailedFile(service, stateFile) {
-  echo "🔎 ${service} est le service qui a echoué."
   def failedServices = [] as Set
   if (fileExists(stateFile)) {
     failedServices = readFile(stateFile).split('\n')
