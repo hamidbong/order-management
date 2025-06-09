@@ -51,7 +51,9 @@ pipeline {
         script {
           def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
           
-          servicesToBuild.each { service ->
+
+
+          /*servicesToBuild.each { service ->
             if (service) { // Vérifier que le nom n'est pas vide
               try {
                 echo "🏗️ Building service: ${service}"
@@ -62,7 +64,19 @@ pipeline {
                 addToFailedFile(service)
               }
             }
+          }*/
+          servicesToBuild.each { service ->
+            echo "🚀 Déclenchement du job Jenkins pour ${service}"
+
+            def buildResult = build job: "${service}/main",
+                                     wait: true,      // Attend la fin du build
+                                     propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
+                                     parameters: []    // Tu peux passer des paramètres si besoin
+
+            echo "🔎 Résultat du job ${service} : ${buildResult.result}"
+            buildResults[service] = buildResult.result
           }
+
         }
       }
     }
