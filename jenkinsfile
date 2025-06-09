@@ -1,5 +1,9 @@
 pipeline {
   agent any
+  environment {
+    SERVICES = 'order-service,user-service'
+    STATE_FILE = '.build-state.json'
+  }
   stages {
 
     stage('Préparation') {
