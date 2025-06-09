@@ -3,6 +3,7 @@ pipeline {
   environment {
     SERVICES = 'order-service,user-service'
     STATE_FILE = '.build-state.json'
+    STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
   }
   stages {
     stage('Préparation') {
@@ -31,8 +32,8 @@ pipeline {
 
           // Ajouter les services en échec
           def failedServices = [] as Set
-          if (fileExists('failed_services.txt')) {
-            failedServices = readFile('failed_services.txt').split('\n')
+          if (fileExists(${env.STATE_FILE})) {
+            failedServices = readFile(${env.STATE_FILE}).split('\n')
                           .collect { it.trim() }
                           .findAll { it } as Set // Supprime les lignes vides
           }
@@ -118,8 +119,8 @@ pipeline {
     /*always {
       echo "📝 État des builds:"
       script {
-        if (fileExists('failed_services.txt')) {
-          def failedServices = readFile('failed_services.txt')
+        if (fileExists(${env.STATE_FILE})) {
+          def failedServices = readFile(${env.STATE_FILE})
           echo "Services en échec:\n${failedServices}"
         } else {
           echo "Aucun service en échec"
@@ -132,22 +133,22 @@ pipeline {
 // Fonctions utilitaires
 def addToFailedFile(service) {
     def failedServices = [] as Set
-    if (fileExists('failed_services.txt')) {
-        failedServices = readFile('failed_services.txt').split('\n')
+    if (fileExists(${env.STATE_FILE})) {
+        failedServices = readFile(${env.STATE_FILE}).split('\n')
                       .collect { it.trim() }
                       .findAll { it } as Set
     }
     if (!failedServices.contains(service)) {
-        writeFile file: 'failed_services.txt', text: (failedServices + service).toList().join('\n').trim()
+        writeFile file: ${env.STATE_FILE}, text: (failedServices + service).toList().join('\n').trim()
     }
 }
 
 def removeFromFailedFile(service) {
-    if (fileExists('failed_services.txt')) {
-        def failedServices = readFile('failed_services.txt').split('\n')
+    if (fileExists(${env.STATE_FILE})) {
+        def failedServices = readFile(${env.STATE_FILE}).split('\n')
                       .collect { it.trim() }
                       .findAll { it } as Set
         failedServices = failedServices - service
-        writeFile file: 'failed_services.txt', text: failedServices.toList().join('\n').trim()
+        writeFile file: ${env.STATE_FILE}, text: failedServices.toList().join('\n').trim()
     }
 }
