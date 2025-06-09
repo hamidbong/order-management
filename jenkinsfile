@@ -6,6 +6,19 @@ pipeline {
     SERVICES = 'order-service,user-service'
   }
   stages {
+    stage('Vérifications Initiales') {
+      steps {
+        script {
+          echo "🔍 Vérification des variables d'environnement"
+          echo "BRANCH_NAME: ${env.BRANCH_NAME ?: 'NON DÉFINI'}"
+          echo "WORKSPACE: ${env.WORKSPACE ?: 'NON DÉFINI'}"
+      
+          if (!env.BRANCH_NAME) {
+            error("La variable BRANCH_NAME n'est pas définie!")
+          }
+        }
+      }
+    }
     stage('Préparation') {
       steps {
         script {
