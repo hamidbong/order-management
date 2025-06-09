@@ -4,13 +4,12 @@ pipeline {
   agent any
   environment {
     SERVICES = 'order-service,user-service'
-    STATE_FILE = ".failed_services_main.txt"
   }
   stages {
     stage('Préparation') {
       steps {
         script {
-          //env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
+          env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
           
 
           buildResults.clear()
@@ -66,6 +65,8 @@ pipeline {
               buildResults[service] = buildResult.result
               if (buildResult.result == 'FAILURE') {
                 addToFailedFile(service, env.STATE_FILE)
+                echo "✅ Ajouté à ${stateFile} : ${service}"
+
                 echo "🔎 ${service} ajouté au fichier des services échoués."
               } else {
                 removeFromFailedFile(service, env.STATE_FILE)
