@@ -21,23 +21,24 @@ pipeline {
 
           echo "🔍 Fichiers modifiés : ${changedFiles}"
 
-          // Convertir la liste des services en List Groovy
-          def services = env.SERVICES.split(',').toList()
+          // Convertir la liste des services en Set pour éliminer les doublons
+          def services = env.SERVICES.split(',').collect { it.trim() } as Set
 
           // Détecter les services affectés
           def affectedServices = services.findAll { service ->
             changedFiles.any { file -> file.startsWith("${service}/") }
-          }
+          } as Set
 
           // Ajouter les services en échec
-          def failedServices = []
+          def failedServices = [] as Set
           if (fileExists('failed_services.txt')) {
-            failedServices = readFile('failed_services.txt').split('\n').toList()
-            failedServices.removeAll { it.trim().isEmpty() } // Nettoyer les lignes vides
+            failedServices = readFile('failed_services.txt').split('\n')
+                          .collect { it.trim() }
+                          .findAll { it } as Set // Supprime les lignes vides
           }
 
-          // Combiner les listes et éliminer les doublons
-          def allServicesToBuild = (affectedServices + failedServices).toUnique()
+          // Combiner les listes en utilisant l'union de Sets
+          def allServicesToBuild = (affectedServices + failedServices).toList()
 
           echo "🚀 Services à builder : ${allServicesToBuild}"
           env.AFFECTED_SERVICES = allServicesToBuild.join(',')
@@ -48,10 +49,9 @@ pipeline {
     stage('Build Microservices') {
       steps {
         script {
-          def servicesToBuild = env.AFFECTED_SERVICES.split(',').toList()
+          def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
           
           servicesToBuild.each { service ->
-            service = service.trim() // Nettoyer les espaces
             if (service) { // Vérifier que le nom n'est pas vide
               try {
                 echo "🏗️ Building service: ${service}"
@@ -88,21 +88,23 @@ pipeline {
 
 // Fonctions utilitaires
 def addToFailedFile(service) {
-    def failedServices = []
+    def failedServices = [] as Set
     if (fileExists('failed_services.txt')) {
-        failedServices = readFile('failed_services.txt').split('\n').toList()
-        failedServices.removeAll { it.trim().isEmpty() } // Nettoyer les lignes vides
+        failedServices = readFile('failed_services.txt').split('\n')
+                      .collect { it.trim() }
+                      .findAll { it } as Set
     }
     if (!failedServices.contains(service)) {
-        writeFile file: 'failed_services.txt', text: "${failedServices.join('\n')}\n${service}".trim()
+        writeFile file: 'failed_services.txt', text: (failedServices + service).toList().join('\n').trim()
     }
 }
 
 def removeFromFailedFile(service) {
     if (fileExists('failed_services.txt')) {
-        def failedServices = readFile('failed_services.txt').split('\n').toList()
-        failedServices.removeAll { it.trim().isEmpty() } // Nettoyer les lignes vides
+        def failedServices = readFile('failed_services.txt').split('\n')
+                      .collect { it.trim() }
+                      .findAll { it } as Set
         failedServices = failedServices - service
-        writeFile file: 'failed_services.txt', text: failedServices.join('\n').trim()
+        writeFile file: 'failed_services.txt', text: failedServices.toList().join('\n').trim()
     }
 }
