@@ -1,16 +1,18 @@
+def buildResults = [:]
+
 pipeline {
   agent any
   environment {
     SERVICES = 'order-service,user-service'
-    //STATE_FILE = '.build-state.json'
-    STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
   }
   stages {
     stage('Préparation') {
       steps {
         script {
-          buildResults = [:]  // Reset à chaque exécution
-          // Initialiser la liste des services modifiés
+          env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
+
+          buildResults.clear()
+
           def changedFiles = []
           try {
             changedFiles = sh(
@@ -23,23 +25,19 @@ pipeline {
 
           echo "🔍 Fichiers modifiés : ${changedFiles}"
 
-          // Convertir la liste des services en Set pour éliminer les doublons
           def services = env.SERVICES.split(',').collect { it.trim() } as Set
 
-          // Détecter les services affectés
           def affectedServices = services.findAll { service ->
             changedFiles.any { file -> file.startsWith("${service}/") }
           } as Set
 
-          // Ajouter les services en échec
           def failedServices = [] as Set
-          if (fileExists("${env.STATE_FILE}")) {
-            failedServices = readFile("${env.STATE_FILE}").split('\n')
-                          .collect { it.trim() }
-                          .findAll { it } as Set // Supprime les lignes vides
+          if (fileExists(env.STATE_FILE)) {
+            failedServices = readFile(env.STATE_FILE).split('\n')
+              .collect { it.trim() }
+              .findAll { it } as Set
           }
 
-          // Combiner les listes en utilisant l'union de Sets
           def allServicesToBuild = (affectedServices + failedServices).toList()
 
           echo "🚀 Services à builder : ${allServicesToBuild}"
@@ -47,48 +45,43 @@ pipeline {
         }
       }
     }
-    
+
     stage('Build Microservices') {
       steps {
         script {
           def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
-           def buildResults = [:]  // 🛠️ Ajout de cette ligne pour initialiser buildResults
 
           servicesToBuild.each { service ->
-           if (service) {
-            echo "🚀 Déclenchement du job Jenkins pour ${service}"
+            if (service) {
+              echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
-            def buildResult = build job: "${service}/main",
-                                     wait: true,      // Attend la fin du build
-                                     propagate: false, // Ne fait pas échouer directement le pipeline orchestrateur
-                                     parameters: []    // Tu peux passer des paramètres si besoin
+              def buildResult = build job: "${service}/main",
+                                       wait: true,
+                                       propagate: false,
+                                       parameters: []
 
-            echo "🔎 Résultat du job ${service} : ${buildResult.result}"
-            buildResults[service] = buildResult.result
-            if(buildResults[service] == 'FAILURE'){
-              addToFailedFile(service, env.STATE_FILE)
-              echo "🔎 le job ${service} : ajouté au fichier des services echoués, cause ${buildResult.result}"
+              echo "🔎 Résultat du job ${service} : ${buildResult.result}"
+              buildResults[service] = buildResult.result
+              if (buildResult.result == 'FAILURE') {
+                addToFailedFile(service, env.STATE_FILE)
+                echo "🔎 ${service} ajouté au fichier des services échoués."
+              } else {
+                removeFromFailedFile(service, env.STATE_FILE)
+              }
             }
-            else {
-              removeFromFailedFile(service, env.STATE_FILE)
-
-            }
-           }
-            
           }
-
         }
+
         script {
           if (buildResults.values().any { it == 'FAILURE' }) {
             currentBuild.result = 'FAILURE'
             echo "❌ Des builds ont échoué."
           }
         }
-
       }
     }
   }
-    
+
   post {
     failure {
       echo "❌ Pipeline orchestrateur échoué."
@@ -102,29 +95,28 @@ pipeline {
         }
       }
     }
-
   }
 }
 
 // Fonctions utilitaires
 def addToFailedFile(service, stateFile) {
-    def failedServices = [] as Set
-    if (fileExists(stateFile)) {
-        failedServices = readFile(stateFile).split('\n')
-                      .collect { it.trim() }
-                      .findAll { it } as Set
-    }
-    if (!failedServices.contains(service)) {
-        writeFile file: stateFile, text: (failedServices + service).toList().join('\n').trim()
-    }
+  def failedServices = [] as Set
+  if (fileExists(stateFile)) {
+    failedServices = readFile(stateFile).split('\n')
+      .collect { it.trim() }
+      .findAll { it } as Set
+  }
+  if (!failedServices.contains(service)) {
+    writeFile file: stateFile, text: (failedServices + service).toList().join('\n').trim()
+  }
 }
 
 def removeFromFailedFile(service, stateFile) {
-    if (fileExists(stateFile)) {
-        def failedServices = readFile(stateFile).split('\n')
-                      .collect { it.trim() }
-                      .findAll { it } as Set
-        failedServices = failedServices - service
-        writeFile file: stateFile, text: failedServices.toList().join('\n').trim()
-    }
+  if (fileExists(stateFile)) {
+    def failedServices = readFile(stateFile).split('\n')
+      .collect { it.trim() }
+      .findAll { it } as Set
+    failedServices = failedServices - service
+    writeFile file: stateFile, text: failedServices.toList().join('\n').trim()
+  }
 }
