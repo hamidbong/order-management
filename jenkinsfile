@@ -77,6 +77,13 @@ pipeline {
 
             echo "🔎 Résultat du job ${service} : ${buildResult.result}"
             buildResults[service] = buildResult.result
+            if(buildResults[service] == 'FAILURE'){
+              addToFailedFile(service)
+              echo "🔎 le job ${service} : ajouté au fichier des services echoués, cause ${buildResult.result}"
+            }
+            else {
+              removeFromFailedFile(service)
+            }
            }
             
           }
