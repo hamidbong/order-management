@@ -53,21 +53,6 @@ pipeline {
         script {
           def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
            def buildResults = [:]  // 🛠️ Ajout de cette ligne pour initialiser buildResults
-          
-
-
-          /*servicesToBuild.each { service ->
-            if (service) { // Vérifier que le nom n'est pas vide
-              try {
-                echo "🏗️ Building service: ${service}"
-                build job: "build-${service}", wait: false
-                removeFromFailedFile(service)
-              } catch (Exception e) {
-                echo "❌ Échec du build pour ${service}: ${e.message}"
-                addToFailedFile(service)
-              }
-            }
-          }*/
 
           servicesToBuild.each { service ->
            if (service) {
@@ -81,11 +66,12 @@ pipeline {
             echo "🔎 Résultat du job ${service} : ${buildResult.result}"
             buildResults[service] = buildResult.result
             if(buildResults[service] == 'FAILURE'){
-              addToFailedFile(service)
+              addToFailedFile(service, env.STATE_FILE)
               echo "🔎 le job ${service} : ajouté au fichier des services echoués, cause ${buildResult.result}"
             }
             else {
-              removeFromFailedFile(service)
+              removeFromFailedFile(service, env.STATE_FILE)
+
             }
            }
             
@@ -117,39 +103,28 @@ pipeline {
       }
     }
 
-    /*always {
-      echo "📝 État des builds:"
-      script {
-        if (fileExists("${env.STATE_FILE}")) {
-          def failedServices = readFile("${env.STATE_FILE}")
-          echo "Services en échec:\n${failedServices}"
-        } else {
-          echo "Aucun service en échec"
-        }
-      }
-    }*/
   }
 }
 
 // Fonctions utilitaires
-def addToFailedFile(service) {
+def addToFailedFile(service, stateFile) {
     def failedServices = [] as Set
-    if (fileExists("${env.STATE_FILE}")) {
-        failedServices = readFile("${env.STATE_FILE}").split('\n')
+    if (fileExists(stateFile)) {
+        failedServices = readFile(stateFile).split('\n')
                       .collect { it.trim() }
                       .findAll { it } as Set
     }
     if (!failedServices.contains(service)) {
-        writeFile file: "${env.STATE_FILE}", text: (failedServices + service).toList().join('\n').trim()
+        writeFile file: stateFile, text: (failedServices + service).toList().join('\n').trim()
     }
 }
 
-def removeFromFailedFile(service) {
-    if (fileExists("${env.STATE_FILE}")) {
-        def failedServices = readFile("${env.STATE_FILE}").split('\n')
+def removeFromFailedFile(service, stateFile) {
+    if (fileExists(stateFile)) {
+        def failedServices = readFile(stateFile).split('\n')
                       .collect { it.trim() }
                       .findAll { it } as Set
         failedServices = failedServices - service
-        writeFile file: "${env.STATE_FILE}", text: failedServices.toList().join('\n').trim()
+        writeFile file: stateFile, text: failedServices.toList().join('\n').trim()
     }
 }
