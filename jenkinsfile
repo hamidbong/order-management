@@ -36,10 +36,10 @@ pipeline {
               echo "⚠️ Ajout du service ${service} car il a échoué précédemment."
               affectedServices << service
             }
-          }
+          }*/
 
           echo "🚀 Services à builder : ${affectedServices}"
-          env.AFFECTED_SERVICES = affectedServices.join(',')*/
+          env.AFFECTED_SERVICES = affectedServices.join(',')
         }
       }
     }
@@ -48,6 +48,8 @@ pipeline {
       steps {
         script {
           // Lire les services précédemment en échec
+          def affectedServices = env.AFFECTED_SERVICES.split(',')
+
           def failedServices = []
           if (fileExists('failed_services.txt')) {
             failedServices = readFile('failed_services.txt').split('\n')
