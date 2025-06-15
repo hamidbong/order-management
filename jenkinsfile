@@ -1,32 +1,33 @@
 def buildResults = [:]
+def buildState = [:]
 
 pipeline {
   agent any
   environment {
     SERVICES = 'order-service,user-service'
+    BUILD_STATE_FILE = '.build-state.json'
   }
+  
   stages {
-    stage('Vérifications Initiales') {
-      steps {
-        script {
-          echo "🔍 Vérification des variables d'environnement"
-          echo "BRANCH_NAME: ${env.BRANCH_NAME ?: 'NON DÉFINI'}"
-          echo "WORKSPACE: ${env.WORKSPACE ?: 'NON DÉFINI'}"
-      
-          if (!env.BRANCH_NAME) {
-            error("La variable BRANCH_NAME n'est pas définie!")
-          }
-        }
-      }
-    }
     stage('Préparation') {
       steps {
         script {
-          env.STATE_FILE = ".failed_services_${env.BRANCH_NAME}.txt"
+          // Initialiser buildState avec la structure de base
+          buildState = [
+            branch: env.BRANCH_NAME,
+            buildNumber: env.BUILD_NUMBER,
+            buildUrl: env.BUILD_URL,
+            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+            services: [:]
+          ]
           
-
-          buildResults.clear()
-
+          // Charger l'état précédent si le fichier existe
+          if (fileExists(env.BUILD_STATE_FILE)) {
+            def previousState = readJSON file: env.BUILD_STATE_FILE
+            buildState.previousState = previousState
+          }
+          
+          // Détection des changements
           def changedFiles = []
           try {
             changedFiles = sh(
@@ -40,22 +41,20 @@ pipeline {
           echo "🔍 Fichiers modifiés : ${changedFiles}"
 
           def services = env.SERVICES.split(',').collect { it.trim() } as Set
-
           def affectedServices = services.findAll { service ->
             changedFiles.any { file -> file.startsWith("${service}/") }
           } as Set
 
-          def failedServices = [] as Set
-          if (fileExists(env.STATE_FILE)) {
-            failedServices = readFile(env.STATE_FILE).split('\n')
-              .collect { it.trim() }
-              .findAll { it } as Set
+          // Ajouter les services précédemment en échec
+          if (buildState.previousState?.services) {
+            def previouslyFailed = buildState.previousState.services.findAll { 
+              k, v -> v.status == 'FAILURE' 
+            }.keySet()
+            affectedServices.addAll(previouslyFailed)
           }
 
-          def allServicesToBuild = (affectedServices + failedServices).toList()
-
-          echo "🚀 Services à builder : ${allServicesToBuild}"
-          env.AFFECTED_SERVICES = allServicesToBuild.join(',')
+          echo "🚀 Services à builder : ${affectedServices}"
+          env.AFFECTED_SERVICES = affectedServices.join(',')
         }
       }
     }
@@ -70,29 +69,31 @@ pipeline {
               echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
               def buildResult = build job: "${service}/main",
-                                       wait: true,
-                                       propagate: false,
-                                       parameters: []
+                                   wait: true,
+                                   propagate: false,
+                                   parameters: []
 
               echo "🔎 Résultat du job ${service} : ${buildResult.result}"
+              
+              // Enregistrer le résultat dans buildResults et buildState
               buildResults[service] = buildResult.result
-              if (buildResult.result == 'FAILURE') {
-                addToFailedFile(service, env.STATE_FILE)
-                echo "✅ Ajouté à ${env.STATE_FILE} : ${service}"
+              buildState.services[service] = [
+                status: buildResult.result,
+                buildNumber: buildResult.number,
+                buildUrl: buildResult.absoluteUrl,
+                timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+              ]
 
-                echo "🔎 ${service} ajouté au fichier des services échoués."
+              if (buildResult.result == 'FAILURE') {
+                echo "❌ ${service} a échoué"
               } else {
-                removeFromFailedFile(service, env.STATE_FILE)
+                echo "✅ ${service} réussi"
               }
             }
           }
-        }
-
-        script {
-          if (buildResults.values().any { it == 'FAILURE' }) {
-            currentBuild.result = 'FAILURE'
-            echo "❌ Des builds ont échoué."
-          }
+          
+          // Écrire le fichier d'état
+          writeJSON file: env.BUILD_STATE_FILE, json: buildState
         }
       }
     }
@@ -104,70 +105,20 @@ pipeline {
     }
 
     always {
+      // Archive le fichier d'état comme artefact
+      archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
+      
+      // Affichage du résumé
       echo "📝 Résumé des builds:"
       script {
         buildResults.each { service, result ->
           echo "🔎 ${service} : ${result}"
         }
+        
+        def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
+        def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
+        echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}"
       }
     }
-  }
-}
-
-// Fonctions utilitaires
-/*def addToFailedFile(service, stateFile) {
-  def failedServices = [] as Set
-  if (fileExists(stateFile)) {
-    failedServices = readFile(stateFile).split('\n')
-      .collect { it.trim() }
-      .findAll { it } as Set
-  }
-  if (!failedServices.contains(service)) {
-    writeFile file: stateFile, text: (failedServices + service).toList().join('\n').trim()
-  }
-}*/
-def addToFailedFile(service, stateFile) {
-  try {
-    echo "=== TENTATIVE D'AJOUT ==="
-    echo "Service: ${service}"
-    echo "Fichier: ${stateFile}"
-    
-    def failedServices = [] as Set
-    if (fileExists(stateFile)) {
-      echo "Fichier existant détecté, lecture..."
-      def content = readFile(stateFile)
-      echo "Contenu actuel: ${content}"
-      failedServices = content.split('\n')
-        .collect { it.trim() }
-        .findAll { it } as Set
-    } else {
-      echo "Fichier n'existe pas encore, création..."
-    }
-    
-    if (!failedServices.contains(service)) {
-      echo "Ajout du service ${service}"
-      def newContent = (failedServices + service).toList().join('\n').trim()
-      echo "Nouveau contenu: ${newContent}"
-      writeFile file: stateFile, text: newContent
-      echo "✅ Écriture réussie"
-    } else {
-      echo "Service déjà présent, pas d'ajout nécessaire"
-    }
-  } catch (Exception e) {
-    echo "❌ ERREUR CRITIQUE: ${e.getClass().getName()}"
-    echo "Message: ${e.message}"
-    echo "Stack trace:"
-    e.printStackTrace()
-    error("Échec de l'ajout au fichier")
-  }
-}
-
-def removeFromFailedFile(service, stateFile) {
-  if (fileExists(stateFile)) {
-    def failedServices = readFile(stateFile).split('\n')
-      .collect { it.trim() }
-      .findAll { it } as Set
-    failedServices = failedServices - service
-    writeFile file: stateFile, text: failedServices.toList().join('\n').trim()
   }
 }
