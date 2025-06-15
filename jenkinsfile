@@ -21,11 +21,25 @@ pipeline {
             services: [:]
           ]
           
-          // Charger l'état précédent si le fichier existe (méthode alternative)
+          // Charger l'état précédent avec gestion d'erreur robuste
           if (fileExists(env.BUILD_STATE_FILE)) {
-            def previousContent = readFile(env.BUILD_STATE_FILE)
-            // Utilisation d'un outil externe pour parser le JSON si nécessaire
-            buildState.previousState = new groovy.json.JsonSlurper().parseText(previousContent)
+            try {
+              def previousContent = readFile(env.BUILD_STATE_FILE).trim()
+              if (previousContent && !previousContent.isEmpty()) {
+                buildState.previousState = new groovy.json.JsonSlurper().parseText(previousContent)
+                echo "✅ État précédent chargé avec succès"
+              } else {
+                echo "⚠️ Fichier d'état existant mais vide"
+                buildState.previousState = [:]
+              }
+            } catch (Exception e) {
+              echo "⚠️ Erreur lors du parsing du fichier d'état: ${e.getMessage()}"
+              echo "Création d'un nouvel état vierge"
+              buildState.previousState = [:]
+            }
+          } else {
+            echo "ℹ️ Aucun fichier d'état précédent trouvé"
+            buildState.previousState = [:]
           }
           
           // Détection des changements
@@ -87,9 +101,14 @@ pipeline {
             }
           }
           
-          // Écrire le fichier d'état (méthode alternative)
-          writeFile file: env.BUILD_STATE_FILE, 
-                   text: groovy.json.JsonOutput.toJson(buildState)
+          // Écrire le fichier d'état avec vérification
+          try {
+            def jsonContent = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(buildState))
+            writeFile file: env.BUILD_STATE_FILE, text: jsonContent
+            echo "✅ État du build sauvegardé dans ${env.BUILD_STATE_FILE}"
+          } catch (Exception e) {
+            echo "❌ Erreur lors de l'écriture du fichier d'état: ${e.getMessage()}"
+          }
         }
       }
     }
@@ -114,6 +133,12 @@ pipeline {
         def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
         def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
         echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}"
+        
+        // Afficher le contenu du fichier d'état pour debug
+        if (fileExists(env.BUILD_STATE_FILE)) {
+          echo "Contenu du fichier d'état:"
+          echo readFile(env.BUILD_STATE_FILE)
+        }
       }
     }
   }
