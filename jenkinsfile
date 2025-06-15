@@ -21,10 +21,11 @@ pipeline {
             services: [:]
           ]
           
-          // Charger l'état précédent si le fichier existe
+          // Charger l'état précédent si le fichier existe (méthode alternative)
           if (fileExists(env.BUILD_STATE_FILE)) {
-            def previousState = readJSON file: env.BUILD_STATE_FILE
-            buildState.previousState = previousState
+            def previousContent = readFile(env.BUILD_STATE_FILE)
+            // Utilisation d'un outil externe pour parser le JSON si nécessaire
+            buildState.previousState = new groovy.json.JsonSlurper().parseText(previousContent)
           }
           
           // Détection des changements
@@ -75,7 +76,7 @@ pipeline {
 
               echo "🔎 Résultat du job ${service} : ${buildResult.result}"
               
-              // Enregistrer le résultat dans buildResults et buildState
+              // Enregistrer le résultat
               buildResults[service] = buildResult.result
               buildState.services[service] = [
                 status: buildResult.result,
@@ -83,17 +84,12 @@ pipeline {
                 buildUrl: buildResult.absoluteUrl,
                 timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
               ]
-
-              if (buildResult.result == 'FAILURE') {
-                echo "❌ ${service} a échoué"
-              } else {
-                echo "✅ ${service} réussi"
-              }
             }
           }
           
-          // Écrire le fichier d'état
-          writeJSON file: env.BUILD_STATE_FILE, json: buildState
+          // Écrire le fichier d'état (méthode alternative)
+          writeFile file: env.BUILD_STATE_FILE, 
+                   text: groovy.json.JsonOutput.toJson(buildState)
         }
       }
     }
