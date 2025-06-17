@@ -47,7 +47,7 @@ pipeline {
           } else {
             echo "ℹ️ Aucun fichier d'état précédent trouvé (${env.BUILD_STATE_FILE})"
           }
-          
+
           /*buildState = [
             branch: env.BRANCH_NAME,
             buildNumber: env.BUILD_NUMBER,
@@ -155,6 +155,27 @@ pipeline {
     }
 
     always {
+      // Écrire le fichier d'état avec vérification améliorée
+      script {
+        try {
+          // Ne pas inclure previousState s'il est vide
+          if (buildState.previousState && buildState.previousState.isEmpty()) {
+            buildState.remove('previousState')
+          }
+          
+          def jsonContent = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(buildState))
+          writeFile file: env.BUILD_STATE_FILE, text: jsonContent
+          echo "✅ État du build sauvegardé dans ${env.BUILD_STATE_FILE}"
+          
+          // Archive et affichage du contenu pour vérification
+          archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
+          echo "Contenu final du fichier d'état:\n${jsonContent}"
+        } catch (Exception e) {
+          echo "❌ Erreur critique lors de l'écriture du fichier d'état: ${e.getMessage()}"
+        }
+      }
+    }
+    /*always {
       // Archive le fichier d'état comme artefact
       archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
       
@@ -175,6 +196,6 @@ pipeline {
           echo readFile(env.BUILD_STATE_FILE)
         }
       }
-    }
+    }*/
   }
 }
