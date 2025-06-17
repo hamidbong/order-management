@@ -9,6 +9,32 @@ pipeline {
   }
   
   stages {
+
+    stage('Checkout complet') {
+      steps {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: "*/${env.BRANCH_NAME}"]],
+          userRemoteConfigs: [[url: 'https://github.com/hamidbong/order-management.git']],
+          doGenerateSubmoduleConfigurations: false,
+          extensions: [
+            [$class: 'CloneOption', 
+              shallow: false, 
+              noTags: false, 
+              depth: 0, 
+              timeout: 10
+            ]
+          ]
+        ])
+        
+        // Tester que git fonctionne
+        script {
+          def commit = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+          echo "✅ Commit actuel : ${commit}"
+        }
+      }
+    }
+
     stage('Préparation') {
       steps {
         script {
