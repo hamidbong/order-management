@@ -50,7 +50,7 @@ pipeline {
               returnStdout: true
             ).trim().split('\n')
           } catch (Exception e) {
-            echo "⚠️ Impossible de détecter les changements: ${e.message}"
+            echo "⚠️ Impossible de détecterr les changements: ${e.message}"
           }
 
           echo "🔍 Fichiers modifiés : ${changedFiles}"
