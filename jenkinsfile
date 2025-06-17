@@ -67,8 +67,38 @@ pipeline {
             buildState.previousState = [:]
           }
           
-          // Détection des changements avec gestion robuste
+          // Détection des changements
           def changedFiles = []
+          try {
+            changedFiles = sh(
+              script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
+              returnStdout: true
+            ).trim().split('\n')
+          } catch (Exception e) {
+            echo "⚠️ Impossible de détecter les changements: ${e.message}"
+          }
+
+          echo "🔍 Fichiers modifiés : ${changedFiles}"
+
+          def services = env.SERVICES.split(',').collect { it.trim() } as Set
+          def affectedServices = services.findAll { service ->
+            changedFiles.any { file -> file.startsWith("${service}/") }
+          } as Set
+
+          // Ajouter les services précédemment en échec
+          if (buildState.previousState?.services) {
+            def previouslyFailed = buildState.previousState.services.findAll { 
+              k, v -> v.status == 'FAILURE' 
+            }.keySet()
+            affectedServices.addAll(previouslyFailed)
+          }
+
+          echo "🚀 Services à builder : ${affectedServices}"
+          env.AFFECTED_SERVICES = affectedServices.join(',')
+        
+
+          // Détection des changements avec gestion robuste
+          /*def changedFiles = []
           try {
             // Méthode plus fiable pour obtenir les commits
             def gitPrevious = sh(script: 'git rev-parse HEAD~1', returnStdout: true).trim()
@@ -101,7 +131,7 @@ pipeline {
 
           echo "🚀 Services à builder : ${affectedServices}"
           env.AFFECTED_SERVICES = affectedServices.join(',')
-        }
+        }*/
       }
     }
 
