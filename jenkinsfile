@@ -18,6 +18,41 @@ pipeline {
             buildNumber: env.BUILD_NUMBER,
             buildUrl: env.BUILD_URL,
             timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+            services: [:],
+            previousState: [:]  // Initialiser explicitement comme objet vide
+          ]
+          
+          // Charger l'état précédent avec une gestion plus robuste
+          if (fileExists(env.BUILD_STATE_FILE)) {
+            try {
+              def previousContent = readFile(env.BUILD_STATE_FILE).trim()
+              
+              if (previousContent && !previousContent.allWhitespace) {
+                echo "Contenu du fichier précédent:\n${previousContent}"
+                def parsedContent = new groovy.json.JsonSlurper().parseText(previousContent)
+                
+                if (parsedContent) {
+                  buildState.previousState = parsedContent
+                  echo "✅ État précédent chargé avec succès"
+                } else {
+                  echo "⚠️ Fichier JSON parsé mais vide"
+                }
+              } else {
+                echo "⚠️ Fichier d'état existant mais vide ou ne contenant que des espaces"
+              }
+            } catch (Exception e) {
+              echo "⚠️ Erreur lors du parsing du fichier d'état: ${e.getMessage()}"
+              // Conserver la structure vide initialisée plus haut
+            }
+          } else {
+            echo "ℹ️ Aucun fichier d'état précédent trouvé (${env.BUILD_STATE_FILE})"
+          }
+          
+          /*buildState = [
+            branch: env.BRANCH_NAME,
+            buildNumber: env.BUILD_NUMBER,
+            buildUrl: env.BUILD_URL,
+            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
             services: [:]
           ]
           
@@ -40,7 +75,7 @@ pipeline {
           } else {
             echo "ℹ️ Aucun fichier d'état précédent trouvé"
             buildState.previousState = [:]
-          }
+          }*/
           
           // Détection des changements
           def changedFiles = []
