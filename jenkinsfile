@@ -12,6 +12,21 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
+          // 🟡 Restaurer le fichier d'état du dernier build réussi (si existe)
+          try {
+            step([
+              $class: 'CopyArtifact',
+              projectName: env.JOB_NAME,
+              selector: lastSuccessful(),
+              filter: env.BUILD_STATE_FILE,
+              target: '.',
+              flatten: true
+            ])
+            echo "✅ Fichier d’état restauré depuis le dernier build réussi"
+          } catch (Exception e) {
+            echo "⚠️ Aucune restauration d’état possible : ${e.message}"
+          }
+
           // Initialiser buildState avec la structure de base
           buildState = [
             branch: env.BRANCH_NAME,
@@ -19,9 +34,9 @@ pipeline {
             buildUrl: env.BUILD_URL,
             timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
             services: [:],
-            previousState: [:]  // Initialiser explicitement comme objet vide
+            previousState: [:]
           ]
-          
+
           // Charger l'état précédent avec une gestion plus robuste
           if (fileExists(env.BUILD_STATE_FILE)) {
             try {
@@ -42,41 +57,11 @@ pipeline {
               }
             } catch (Exception e) {
               echo "⚠️ Erreur lors du parsing du fichier d'état: ${e.getMessage()}"
-              // Conserver la structure vide initialisée plus haut
             }
           } else {
             echo "ℹ️ Aucun fichier d'état précédent trouvé (${env.BUILD_STATE_FILE})"
           }
 
-          /*buildState = [
-            branch: env.BRANCH_NAME,
-            buildNumber: env.BUILD_NUMBER,
-            buildUrl: env.BUILD_URL,
-            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
-            services: [:]
-          ]
-          
-          // Charger l'état précédent avec gestion d'erreur robuste
-          if (fileExists(env.BUILD_STATE_FILE)) {
-            try {
-              def previousContent = readFile(env.BUILD_STATE_FILE).trim()
-              if (previousContent && !previousContent.isEmpty()) {
-                buildState.previousState = new groovy.json.JsonSlurper().parseText(previousContent)
-                echo "✅ État précédent chargé avec succès"
-              } else {
-                echo "⚠️ Fichier d'état existant mais vide"
-                buildState.previousState = [:]
-              }
-            } catch (Exception e) {
-              echo "⚠️ Erreur lors du parsing du fichier d'état: ${e.getMessage()}"
-              echo "Création d'un nouvel état vierge"
-              buildState.previousState = [:]
-            }
-          } else {
-            echo "ℹ️ Aucun fichier d'état précédent trouvé"
-            buildState.previousState = [:]
-          }*/
-          
           // Détection des changements
           def changedFiles = []
           try {
@@ -85,7 +70,7 @@ pipeline {
               returnStdout: true
             ).trim().split('\n')
           } catch (Exception e) {
-            echo "⚠️ Impossible de détecterr les changements: ${e.message}"
+            echo "⚠️ Impossible de détecter les changements : ${e.message}"
           }
 
           echo "🔍 Fichiers modifiés : ${changedFiles}"
@@ -135,8 +120,8 @@ pipeline {
               ]
             }
           }
-          
-          // Écrire le fichier d'état avec vérification
+
+          // Sauvegarder le nouvel état
           try {
             def jsonContent = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(buildState))
             writeFile file: env.BUILD_STATE_FILE, text: jsonContent
@@ -155,47 +140,22 @@ pipeline {
     }
 
     always {
-      // Écrire le fichier d'état avec vérification améliorée
       script {
         try {
-          // Ne pas inclure previousState s'il est vide
-          if (buildState.previousState && buildState.previousState.isEmpty()) {
+          if (buildState.previousState?.isEmpty()) {
             buildState.remove('previousState')
           }
-          
+
           def jsonContent = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(buildState))
           writeFile file: env.BUILD_STATE_FILE, text: jsonContent
-          echo "✅ État du build sauvegardé dans ${env.BUILD_STATE_FILE}"
-          
-          // Archive et affichage du contenu pour vérification
+          echo "✅ État final du build sauvegardé"
+
           archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
-          echo "Contenu final du fichier d'état:\n${jsonContent}"
+          echo "📄 Contenu final du fichier d'état :\n${jsonContent}"
         } catch (Exception e) {
-          echo "❌ Erreur critique lors de l'écriture du fichier d'état: ${e.getMessage()}"
+          echo "❌ Erreur critique lors de la sauvegarde finale : ${e.getMessage()}"
         }
       }
     }
-    /*always {
-      // Archive le fichier d'état comme artefact
-      archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
-      
-      // Affichage du résumé
-      echo "📝 Résumé des builds:"
-      script {
-        buildResults.each { service, result ->
-          echo "🔎 ${service} : ${result}"
-        }
-        
-        def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
-        def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
-        echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}"
-        
-        // Afficher le contenu du fichier d'état pour debug
-        if (fileExists(env.BUILD_STATE_FILE)) {
-          echo "Contenu du fichier d'état:"
-          echo readFile(env.BUILD_STATE_FILE)
-        }
-      }
-    }*/
   }
 }
