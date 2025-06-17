@@ -24,8 +24,9 @@ pipeline {
             ])
             echo "✅ Artefact récupéré avec succès"
           } catch (Exception e) {
-            echo "⚠️ Impossible de restaurer l’artefact : ${e.message}"
+            echo "⚠️ Impossible de restaurer l'artefact : ${e.message}"
           }
+          
           // Initialiser buildState avec la structure de base
           buildState = [
             branch: env.BRANCH_NAME,
@@ -43,47 +44,57 @@ pipeline {
               
               if (previousContent && !previousContent.allWhitespace) {
                 echo "Contenu du fichier précédent:\n${previousContent}"
-                def parsedContent = new groovy.json.JsonSlurper().parseText(previousContent)
+                // Conversion explicite en Map
+                def parsedContent = new groovy.json.JsonSlurper().parseText(previousContent) as Map
                 
-                if (parsedContent) {
-                  buildState.previousState = parsedContent
+                if (parsedContent && !parsedContent.isEmpty()) {
+                  buildState.previousState = parsedContent ?: [:]
                   echo "✅ État précédent chargé avec succès"
                 } else {
                   echo "⚠️ Fichier JSON parsé mais vide"
+                  buildState.previousState = [:]
                 }
               } else {
                 echo "⚠️ Fichier d'état existant mais vide ou ne contenant que des espaces"
+                buildState.previousState = [:]
               }
             } catch (Exception e) {
               echo "⚠️ Erreur lors du parsing du fichier d'état: ${e.getMessage()}"
-              // Conserver la structure vide initialisée plus haut
+              buildState.previousState = [:]
             }
           } else {
             echo "ℹ️ Aucun fichier d'état précédent trouvé (${env.BUILD_STATE_FILE})"
+            buildState.previousState = [:]
           }
           
-          // Détection des changements
+          // Détection des changements avec gestion robuste
           def changedFiles = []
           try {
+            // Méthode plus fiable pour obtenir les commits
+            def gitPrevious = sh(script: 'git rev-parse HEAD~1', returnStdout: true).trim()
+            def gitCurrent = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+            
             changedFiles = sh(
-              script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
+              script: "git diff --name-only ${gitPrevious} ${gitCurrent}",
               returnStdout: true
-            ).trim().split('\n')
+            ).trim().split('\n').findAll { it.trim().length() > 0 }
+            
+            echo "🔍 Fichiers modifiés : ${changedFiles}"
           } catch (Exception e) {
             echo "⚠️ Impossible de détecter les changements: ${e.message}"
+            changedFiles = []
           }
 
-          echo "🔍 Fichiers modifiés : ${changedFiles}"
-
+          // Détection des services affectés
           def services = env.SERVICES.split(',').collect { it.trim() } as Set
           def affectedServices = services.findAll { service ->
             changedFiles.any { file -> file.startsWith("${service}/") }
           } as Set
 
           // Ajouter les services précédemment en échec
-          if (buildState.previousState?.services) {
+          if (buildState.previousState?.services instanceof Map) {
             def previouslyFailed = buildState.previousState.services.findAll { 
-              k, v -> v.status == 'FAILURE' 
+              k, v -> v?.status == 'FAILURE' 
             }.keySet()
             affectedServices.addAll(previouslyFailed)
           }
@@ -97,10 +108,12 @@ pipeline {
     stage('Build Microservices') {
       steps {
         script {
-          def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
+          def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }.findAll { it }
 
-          servicesToBuild.each { service ->
-            if (service) {
+          if (servicesToBuild.isEmpty()) {
+            echo "ℹ️ Aucun service à builder - skip"
+          } else {
+            servicesToBuild.each { service ->
               echo "🚀 Déclenchement du job Jenkins pour ${service}"
 
               def buildResult = build job: "${service}/main",
@@ -152,7 +165,8 @@ pipeline {
         
         def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
         def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
-        echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}"
+        def abortedCount = buildResults.count { k, v -> v == 'ABORTED' }
+        echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}, ABANDONNÉS: ${abortedCount}"
         
         // Afficher le contenu du fichier d'état pour debug
         if (fileExists(env.BUILD_STATE_FILE)) {
