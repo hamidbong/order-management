@@ -12,7 +12,7 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
-          // 🟡 Restaurer le fichier d'état du dernier build réussi (si existe)
+          // 🔁 Récupération du dernier état sauvegardé depuis artefact
           try {
             step([
               $class: 'CopyArtifact',
@@ -27,7 +27,7 @@ pipeline {
             echo "⚠️ Aucune restauration d’état possible : ${e.message}"
           }
 
-          // Initialiser buildState avec la structure de base
+          // Initialisation de l'état du build
           buildState = [
             branch: env.BRANCH_NAME,
             buildNumber: env.BUILD_NUMBER,
@@ -37,17 +37,15 @@ pipeline {
             previousState: [:]
           ]
 
-          // Charger l'état précédent avec une gestion plus robuste
+          // Lecture et parsing sécurisé du fichier existant
           if (fileExists(env.BUILD_STATE_FILE)) {
             try {
               def previousContent = readFile(env.BUILD_STATE_FILE).trim()
-              
               if (previousContent && !previousContent.allWhitespace) {
                 echo "Contenu du fichier précédent:\n${previousContent}"
                 def parsedContent = new groovy.json.JsonSlurper().parseText(previousContent)
-                
                 if (parsedContent) {
-                  buildState.previousState = parsedContent
+                  buildState.previousState = parsedContent.collectEntries { k, v -> [(k): v] }
                   echo "✅ État précédent chargé avec succès"
                 } else {
                   echo "⚠️ Fichier JSON parsé mais vide"
@@ -62,11 +60,16 @@ pipeline {
             echo "ℹ️ Aucun fichier d'état précédent trouvé (${env.BUILD_STATE_FILE})"
           }
 
-          // Détection des changements
+          // 🔍 Détection des changements entre commits
           def changedFiles = []
+          def previousCommit = ''
+          def currentCommit = ''
           try {
+            previousCommit = sh(script: "git rev-parse HEAD~1", returnStdout: true).trim()
+            currentCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+            echo "🔁 Comparaison de ${previousCommit} -> ${currentCommit}"
             changedFiles = sh(
-              script: "git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT}",
+              script: "git diff --name-only ${previousCommit} ${currentCommit}",
               returnStdout: true
             ).trim().split('\n')
           } catch (Exception e) {
@@ -80,7 +83,7 @@ pipeline {
             changedFiles.any { file -> file.startsWith("${service}/") }
           } as Set
 
-          // Ajouter les services précédemment en échec
+          // Ajouter services en échec précédemment
           if (buildState.previousState?.services) {
             def previouslyFailed = buildState.previousState.services.findAll { 
               k, v -> v.status == 'FAILURE' 
@@ -95,6 +98,9 @@ pipeline {
     }
 
     stage('Build Microservices') {
+      when {
+        expression { return env.AFFECTED_SERVICES?.trim() }
+      }
       steps {
         script {
           def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }
@@ -109,8 +115,7 @@ pipeline {
                                    parameters: []
 
               echo "🔎 Résultat du job ${service} : ${buildResult.result}"
-              
-              // Enregistrer le résultat
+
               buildResults[service] = buildResult.result
               buildState.services[service] = [
                 status: buildResult.result,
@@ -121,7 +126,7 @@ pipeline {
             }
           }
 
-          // Sauvegarder le nouvel état
+          // Sauvegarder le fichier d'état après build
           try {
             def jsonContent = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(buildState))
             writeFile file: env.BUILD_STATE_FILE, text: jsonContent
@@ -148,10 +153,8 @@ pipeline {
 
           def jsonContent = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(buildState))
           writeFile file: env.BUILD_STATE_FILE, text: jsonContent
-          echo "✅ État final du build sauvegardé"
-
           archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
-          echo "📄 Contenu final du fichier d'état :\n${jsonContent}"
+          echo "📦 Contenu final du fichier d'état :\n${jsonContent}"
         } catch (Exception e) {
           echo "❌ Erreur critique lors de la sauvegarde finale : ${e.getMessage()}"
         }
