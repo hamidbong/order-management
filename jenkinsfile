@@ -132,6 +132,7 @@ pipeline {
           echo "🚀 Services à builder : ${affectedServices}"
           env.AFFECTED_SERVICES = affectedServices.join(',')
         }*/
+        }
       }
     }
 
