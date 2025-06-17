@@ -12,6 +12,20 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
+          // 🟡 Restaurer le fichier d'état du dernier build réussi
+          try {
+            step([
+              $class: 'CopyArtifact',
+              projectName: env.JOB_NAME,
+              selector: lastSuccessful(),
+              filter: env.BUILD_STATE_FILE,
+              target: '.',
+              flatten: true
+            ])
+            echo "✅ Artefact récupéré avec succès"
+          } catch (Exception e) {
+            echo "⚠️ Impossible de restaurer l’artefact : ${e.message}"
+          }
           // Initialiser buildState avec la structure de base
           buildState = [
             branch: env.BRANCH_NAME,
