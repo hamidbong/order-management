@@ -12,7 +12,6 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
-          //def buildState = [:]  // Déclarée ici uniquement
           try {
             step([
               $class: 'CopyArtifact',
@@ -27,13 +26,15 @@ pipeline {
             echo "⚠️ Impossible de restaurer l'artefact : ${e.message}"
           }
 
-          // Mise à jour des champs sans réaffectation complète
-          buildState.branch = env.BRANCH_NAME
-          buildState.buildNumber = env.BUILD_NUMBER
-          buildState.buildUrl = env.BUILD_URL
-          buildState.timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-          buildState.services = [:]
-          buildState.previousState = [:]
+          // Initialisation de buildState
+          buildState = [
+            branch: env.BRANCH_NAME,
+            buildNumber: env.BUILD_NUMBER,
+            buildUrl: env.BUILD_URL,
+            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+            services: [:],
+            previousState: [:]
+          ]
 
           // Chargement état précédent
           if (fileExists(env.BUILD_STATE_FILE)) {
@@ -41,11 +42,9 @@ pipeline {
               def content = readFile(env.BUILD_STATE_FILE).trim()
               if (content && !content.allWhitespace) {
                 echo "Contenu précédent:\n${content}"
-                // Sécurité contre LazyMap
-                def safeJson = groovy.json.JsonOutput.toJson(
-                  new groovy.json.JsonSlurper().parseText(content)
-                )
-                buildState.previousState = new groovy.json.JsonSlurper().parseText(safeJson) as Map
+                // Conversion explicite pour éviter LazyMap
+                def parsedJson = new groovy.json.JsonSlurper().parseText(content)
+                buildState.previousState = new HashMap(parsedJson)
                 echo "✅ État précédent chargé"
               } else {
                 echo "⚠️ Fichier d'état vide"
@@ -56,6 +55,7 @@ pipeline {
           } else {
             echo "ℹ️ Aucun fichier d'état trouvé"
           }
+
           // Détection des fichiers changés
           def changedFiles = []
           try {
@@ -69,6 +69,7 @@ pipeline {
             echo "🔍 Fichiers modifiés : ${changedFiles}"
           } catch (Exception e) {
             echo "⚠️ Erreur détection changements : ${e.getMessage()}"
+            changedFiles = [] // Assure que changedFiles est toujours une liste
           }
 
           // Services affectés
@@ -82,7 +83,9 @@ pipeline {
             def previouslyFailed = buildState.previousState.services.findAll { k, v ->
               v?.status == 'FAILURE'
             }?.keySet()
-            affectedServices.addAll(previouslyFailed)
+            if (previouslyFailed) {
+              affectedServices.addAll(previouslyFailed)
+            }
           }
 
           echo "🚀 Services à builder : ${affectedServices}"
@@ -94,27 +97,37 @@ pipeline {
     stage('Build Microservices') {
       steps {
         script {
-          def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }.findAll { it }
+          def servicesToBuild = env.AFFECTED_SERVICES?.split(',')?.collect { it.trim() }?.findAll { it } ?: []
 
           if (servicesToBuild.isEmpty()) {
             echo "ℹ️ Aucun service à builder"
           } else {
             servicesToBuild.each { service ->
               echo "🚀 Déclenchement du job pour ${service}"
-              def buildResult = build job: "${service}/main",
-                                     wait: true,
-                                     propagate: false,
-                                     parameters: []
+              try {
+                def buildResult = build job: "${service}/main",
+                                       wait: true,
+                                       propagate: false,
+                                       parameters: []
 
-              echo "🔎 Résultat ${service} : ${buildResult.result}"
+                echo "🔎 Résultat ${service} : ${buildResult.result}"
 
-              buildResults[service] = buildResult.result
-              buildState.services[service] = [
-                status: buildResult.result,
-                buildNumber: buildResult.number,
-                buildUrl: buildResult.absoluteUrl,
-                timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-              ]
+                buildResults[service] = buildResult.result
+                buildState.services[service] = [
+                  status: buildResult.result,
+                  buildNumber: buildResult.number,
+                  buildUrl: buildResult.absoluteUrl,
+                  timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+                ]
+              } catch (Exception e) {
+                echo "❌ Erreur lors du build de ${service}: ${e.message}"
+                buildResults[service] = 'FAILURE'
+                buildState.services[service] = [
+                  status: 'FAILURE',
+                  error: e.message,
+                  timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+                ]
+              }
             }
           }
 
@@ -138,22 +151,32 @@ pipeline {
     }
 
     always {
-      archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
-      echo "📝 Résumé des builds :"
       script {
-        buildResults.each { service, result ->
-          echo "🔎 ${service} : ${result}"
-        }
+        try {
+          // Archiver seulement si le fichier existe
+          if (fileExists(env.BUILD_STATE_FILE)) {
+            archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
+          } else {
+            echo "⚠️ Fichier d'état non trouvé pour archivage"
+          }
 
-        def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
-        def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
-        def abortedCount = buildResults.count { k, v -> v == 'ABORTED' }
+          echo "📝 Résumé des builds :"
+          buildResults.each { service, result ->
+            echo "🔎 ${service} : ${result}"
+          }
 
-        echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}, ABANDONNÉS: ${abortedCount}"
+          def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
+          def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
+          def abortedCount = buildResults.count { k, v -> v == 'ABORTED' }
 
-        if (fileExists(env.BUILD_STATE_FILE)) {
-          echo "📂 Contenu du fichier d'état :"
-          echo readFile(env.BUILD_STATE_FILE)
+          echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}, ABANDONNÉS: ${abortedCount}"
+
+          if (fileExists(env.BUILD_STATE_FILE)) {
+            echo "📂 Contenu du fichier d'état :"
+            echo readFile(env.BUILD_STATE_FILE)
+          }
+        } catch (Exception e) {
+          echo "⚠️ Erreur dans la section post: ${e.message}"
         }
       }
     }
