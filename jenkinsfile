@@ -129,6 +129,7 @@ pipeline {
                     propagate: false,
                     parameters: [],
                     timeout: time(time: 30, unit: 'MINUTES')
+                  )
                   
                   def result = "${buildResult.result}"
                   echo "🔎 Résultat ${service} : ${result}"
