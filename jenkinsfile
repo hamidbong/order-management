@@ -1,11 +1,12 @@
 def buildResults = [:]
-def buildState = [:]
+def buildState = [services: [:]]
 
 pipeline {
   agent any
+
   environment {
     SERVICES = 'order-service,user-service'
-    BUILD_STATE_FILE = '.build-state.json'
+    BUILD_STATE_FILE = '.build-state.txt'
   }
 
   stages {
@@ -26,71 +27,41 @@ pipeline {
             echo "⚠️ Impossible de restaurer l'artefact : ${e.message}"
           }
 
-          buildState.branch = env.BRANCH_NAME
-          buildState.buildNumber = env.BUILD_NUMBER
-          buildState.buildUrl = env.BUILD_URL
-          buildState.timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-          buildState.services = [:]
-          buildState.previousState = [:]
-
+          // 🔁 Charger les services en échec précédent
+          def previousFailures = [] as Set
           if (fileExists(env.BUILD_STATE_FILE)) {
-            try {
-              def content = readFile(env.BUILD_STATE_FILE).trim()
-              if (content && !content.allWhitespace) {
-                echo "Contenu précédent:\n${content}"
-                def parsed = new groovy.json.JsonSlurper().parseText(content)
-                def deepCopy = new groovy.json.JsonSlurper().parseText(
-                  groovy.json.JsonOutput.toJson(parsed)
-                ) as Map
-                buildState.previousState = deepCopy.previousState ?: [:]
-                echo "✅ État précédent chargé"
-              } else {
-                echo "⚠️ Fichier d'état vide"
+            readFile(env.BUILD_STATE_FILE).trim().split('\n').each { line ->
+              def parts = line.split(':', 5)
+              if (parts.size() == 5 && parts[1] == 'FAILURE') {
+                previousFailures << parts[0]
               }
-            } catch (Exception e) {
-              echo "⚠️ Erreur parsing JSON : ${e.getMessage()}"
             }
+            echo "⚠️ Services échoués précédemment : ${previousFailures}"
           } else {
             echo "ℹ️ Aucun fichier d'état trouvé"
           }
 
-          // 🔐 Détection sécurisée des fichiers changés
+          // 🔍 Détection des fichiers modifiés via Git
           def changedFiles = []
           try {
             def gitPrevious = sh(script: 'git rev-parse HEAD~1 || echo HEAD', returnStdout: true).trim()
             def gitCurrent = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-            def diffOutput = sh(
-              script: "git diff --name-only ${gitPrevious} ${gitCurrent} || echo ''",
-              returnStdout: true
-            ).trim()
+            def diffOutput = sh(script: "git diff --name-only ${gitPrevious} ${gitCurrent} || echo ''", returnStdout: true).trim()
             changedFiles = diffOutput ? diffOutput.split('\n').findAll { it.trim() } : []
             echo "🔍 Fichiers modifiés : ${changedFiles}"
           } catch (Exception e) {
-            echo "⚠️ Erreur détection changements : ${e.getMessage()}"
-            changedFiles = []
+            echo "⚠️ Erreur détection changements : ${e.message}"
           }
 
-          // 🔐 Sélection sécurisée des services à builder
-          def affectedServices = []
-          try {
-            def services = env.SERVICES.split(',').collect { it.trim() } as Set
-            affectedServices = services.findAll { service ->
-              changedFiles.any { file -> file.startsWith("${service}/") }
-            } as Set
+          // 🧠 Déterminer les services affectés
+          def services = env.SERVICES.split(',').collect { it.trim() } as Set
+          def affectedServices = services.findAll { service ->
+            changedFiles.any { file -> file.startsWith("${service}/") }
+          } as Set
+          affectedServices.addAll(previousFailures)
 
-            if (buildState.previousState?.services instanceof Map) {
-              def previouslyFailed = buildState.previousState.services.findAll { k, v ->
-                v?.status == 'FAILURE'
-              }?.keySet()
-              affectedServices.addAll(previouslyFailed)
-            }
-
-            echo "🚀 Services à builder : ${affectedServices}"
-            env.AFFECTED_SERVICES = affectedServices.join(',')
-          } catch (Exception e) {
-            echo "⚠️ Erreur calcul services : ${e.message}"
-            env.AFFECTED_SERVICES = ''
-          }
+          echo "🚀 Services à builder : ${affectedServices}"
+          env.AFFECTED_SERVICES = affectedServices.join(',')
         }
       }
     }
@@ -99,43 +70,34 @@ pipeline {
       steps {
         script {
           def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }.findAll { it }
-
           if (servicesToBuild.isEmpty()) {
             echo "ℹ️ Aucun service à builder"
           } else {
             servicesToBuild.each { service ->
               echo "🚀 Déclenchement du job pour ${service}"
-              def buildResult = build job: "${service}/main",
-                                     wait: true,
-                                     propagate: false,
-                                     parameters: []
+              def result = build job: "${service}/main",
+                                wait: true,
+                                propagate: false,
+                                parameters: []
 
-              def result = "${buildResult.result}"
-              echo "🔎 Résultat ${service} : ${result}"
+              def status = result.result
+              echo "🔎 Résultat ${service} : ${status}"
 
-              buildResults[service] = result
+              buildResults[service] = status
               buildState.services[service] = [
-                status: result,
-                buildNumber: buildResult.number,
-                buildUrl: buildResult.absoluteUrl,
+                status: status,
+                buildNumber: result.number,
+                buildUrl: result.absoluteUrl,
                 timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
               ]
             }
-          }
 
-          // ✅ Sauvegarde de previousState pour la prochaine exécution
-          buildState.previousState = [
-            services: buildState.services
-          ]
-
-          try {
-            def jsonContent = groovy.json.JsonOutput.prettyPrint(
-              groovy.json.JsonOutput.toJson(buildState)
-            )
-            writeFile file: env.BUILD_STATE_FILE, text: jsonContent
-            echo "✅ État sauvegardé dans ${env.BUILD_STATE_FILE}"
-          } catch (Exception e) {
-            echo "❌ Erreur écriture état : ${e.getMessage()}"
+            // 💾 Sauvegarde de l’état sous forme texte
+            def lines = buildState.services.collect { svc, info ->
+              "${svc}:${info.status}:${info.buildNumber}:${info.buildUrl}:${info.timestamp}"
+            }
+            writeFile file: env.BUILD_STATE_FILE, text: lines.join('\n')
+            echo "✅ État texte sauvegardé dans ${env.BUILD_STATE_FILE}"
           }
         }
       }
@@ -151,7 +113,7 @@ pipeline {
       archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
       echo "📝 Résumé des builds :"
       script {
-        if (buildResults instanceof Map && !buildResults.isEmpty()) {
+        if (buildResults) {
           buildResults.each { service, result ->
             echo "🔎 ${service} : ${result}"
           }
@@ -166,7 +128,7 @@ pipeline {
         }
 
         if (fileExists(env.BUILD_STATE_FILE)) {
-          echo "📂 Contenu du fichier d'état :"
+          echo "📂 Contenu du fichier d'état texte :"
           echo readFile(env.BUILD_STATE_FILE)
         }
       }
