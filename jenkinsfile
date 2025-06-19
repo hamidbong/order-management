@@ -26,7 +26,6 @@ pipeline {
             echo "⚠️ Impossible de restaurer l'artefact : ${e.message}"
           }
 
-          // Initialisation
           buildState.branch = env.BRANCH_NAME
           buildState.buildNumber = env.BUILD_NUMBER
           buildState.buildUrl = env.BUILD_URL
@@ -34,7 +33,6 @@ pipeline {
           buildState.services = [:]
           buildState.previousState = [:]
 
-          // Chargement de l'état précédent
           if (fileExists(env.BUILD_STATE_FILE)) {
             try {
               def content = readFile(env.BUILD_STATE_FILE).trim()
@@ -56,37 +54,43 @@ pipeline {
             echo "ℹ️ Aucun fichier d'état trouvé"
           }
 
-          // Détection des fichiers changés
+          // 🔐 Détection sécurisée des fichiers changés
           def changedFiles = []
           try {
             def gitPrevious = sh(script: 'git rev-parse HEAD~1 || echo HEAD', returnStdout: true).trim()
             def gitCurrent = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-
-            changedFiles = sh(
-              script: "git diff --name-only ${gitPrevious} ${gitCurrent}",
+            def diffOutput = sh(
+              script: "git diff --name-only ${gitPrevious} ${gitCurrent} || echo ''",
               returnStdout: true
-            ).trim().split('\n').findAll { it.trim() }
+            ).trim()
+            changedFiles = diffOutput ? diffOutput.split('\n').findAll { it.trim() } : []
             echo "🔍 Fichiers modifiés : ${changedFiles}"
           } catch (Exception e) {
             echo "⚠️ Erreur détection changements : ${e.getMessage()}"
+            changedFiles = []
           }
 
-          // Détection des services affectés
-          def services = env.SERVICES.split(',').collect { it.trim() } as Set
-          def affectedServices = services.findAll { service ->
-            changedFiles.any { file -> file.startsWith("${service}/") }
-          } as Set
+          // 🔐 Sélection sécurisée des services à builder
+          def affectedServices = []
+          try {
+            def services = env.SERVICES.split(',').collect { it.trim() } as Set
+            affectedServices = services.findAll { service ->
+              changedFiles.any { file -> file.startsWith("${service}/") }
+            } as Set
 
-          // Ajouter les services échoués précédemment
-          if (buildState.previousState?.services instanceof Map) {
-            def previouslyFailed = buildState.previousState.services.findAll { k, v ->
-              v?.status == 'FAILURE'
-            }?.keySet()
-            affectedServices.addAll(previouslyFailed)
+            if (buildState.previousState?.services instanceof Map) {
+              def previouslyFailed = buildState.previousState.services.findAll { k, v ->
+                v?.status == 'FAILURE'
+              }?.keySet()
+              affectedServices.addAll(previouslyFailed)
+            }
+
+            echo "🚀 Services à builder : ${affectedServices}"
+            env.AFFECTED_SERVICES = affectedServices.join(',')
+          } catch (Exception e) {
+            echo "⚠️ Erreur calcul services : ${e.message}"
+            env.AFFECTED_SERVICES = ''
           }
-
-          echo "🚀 Services à builder : ${affectedServices}"
-          env.AFFECTED_SERVICES = affectedServices.join(',')
         }
       }
     }
@@ -106,11 +110,10 @@ pipeline {
                                      propagate: false,
                                      parameters: []
 
-              def result = "${buildResult.result}" // Sécurisé
+              def result = "${buildResult.result}"
               echo "🔎 Résultat ${service} : ${result}"
 
               buildResults[service] = result
-
               buildState.services[service] = [
                 status: result,
                 buildNumber: buildResult.number,
@@ -120,12 +123,11 @@ pipeline {
             }
           }
 
-          // ✅ Copier les services actuels dans previousState pour la prochaine exécution
+          // ✅ Sauvegarde de previousState pour la prochaine exécution
           buildState.previousState = [
             services: buildState.services
           ]
 
-          // Sauvegarde de l'état
           try {
             def jsonContent = groovy.json.JsonOutput.prettyPrint(
               groovy.json.JsonOutput.toJson(buildState)
@@ -164,9 +166,8 @@ pipeline {
         }
 
         if (fileExists(env.BUILD_STATE_FILE)) {
-          def stateContent = readFile(env.BUILD_STATE_FILE).trim()
           echo "📂 Contenu du fichier d'état :"
-          echo "${stateContent}"
+          echo readFile(env.BUILD_STATE_FILE)
         }
       }
     }
