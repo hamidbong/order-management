@@ -26,7 +26,7 @@ pipeline {
             echo "⚠️ Impossible de restaurer l'artefact : ${e.message}"
           }
 
-          // Mise à jour des champs de buildState (pas de réaffectation)
+          // Initialisation
           buildState.branch = env.BRANCH_NAME
           buildState.buildNumber = env.BUILD_NUMBER
           buildState.buildUrl = env.BUILD_URL
@@ -34,7 +34,7 @@ pipeline {
           buildState.services = [:]
           buildState.previousState = [:]
 
-          // Chargement de l'état précédent
+          // Chargement état précédent
           if (fileExists(env.BUILD_STATE_FILE)) {
             try {
               def content = readFile(env.BUILD_STATE_FILE).trim()
@@ -44,7 +44,7 @@ pipeline {
                 def deepCopy = new groovy.json.JsonSlurper().parseText(
                   groovy.json.JsonOutput.toJson(parsed)
                 ) as Map
-                buildState.previousState = deepCopy
+                buildState.previousState = deepCopy.previousState ?: [:]
                 echo "✅ État précédent chargé"
               } else {
                 echo "⚠️ Fichier d'état vide"
@@ -71,13 +71,13 @@ pipeline {
             echo "⚠️ Erreur détection changements : ${e.getMessage()}"
           }
 
-          // Services affectés par les changements
+          // Détermination des services à builder
           def services = env.SERVICES.split(',').collect { it.trim() } as Set
           def affectedServices = services.findAll { service ->
             changedFiles.any { file -> file.startsWith("${service}/") }
           } as Set
 
-          // Ajouter les services en échec lors du dernier build
+          // Ajouter ceux en échec précédemment
           if (buildState.previousState?.services instanceof Map) {
             def previouslyFailed = buildState.previousState.services.findAll { k, v ->
               v?.status == 'FAILURE'
@@ -106,7 +106,7 @@ pipeline {
                                      propagate: false,
                                      parameters: []
 
-              def result = "${buildResult.result}"  // String sécurisé
+              def result = "${buildResult.result}" // String only
               echo "🔎 Résultat ${service} : ${result}"
 
               buildResults[service] = result
@@ -120,7 +120,7 @@ pipeline {
             }
           }
 
-          // Sauvegarde de l'état
+          // Sauvegarde état
           try {
             def jsonContent = groovy.json.JsonOutput.prettyPrint(
               groovy.json.JsonOutput.toJson(buildState)
@@ -159,8 +159,9 @@ pipeline {
         }
 
         if (fileExists(env.BUILD_STATE_FILE)) {
+          def stateContent = readFile(env.BUILD_STATE_FILE).trim()
           echo "📂 Contenu du fichier d'état :"
-          echo readFile(env.BUILD_STATE_FILE)
+          echo "${stateContent}"
         }
       }
     }
