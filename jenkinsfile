@@ -68,7 +68,7 @@ pipeline {
             ).trim().split('\n').findAll { it.trim() }
             echo "🔍 Fichiers modifiés : ${changedFiles}"
           } catch (Exception e) {
-            echo "⚠️ Erreur détection changements : ${e.getMessage()}"
+            echo "⚠️ Erreurs détection changements : ${e.getMessage()}"
           }
 
           // Détermination des services à builder
