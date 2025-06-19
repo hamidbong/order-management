@@ -57,83 +57,12 @@ pipeline {
             echo "ℹ️ Aucun fichier d'état trouvé"
           }
 
-          // Détection des fichiers changés
-          def changedFiles = []
-          try {
-            def gitPrevious = sh(script: 'git rev-parse HEAD~1 || echo HEAD', returnStdout: true).trim()
-            def gitCurrent = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-
-            changedFiles = sh(
-              script: "git diff --name-only ${gitPrevious} ${gitCurrent}",
-              returnStdout: true
-            ).trim().split('\n').findAll { it.trim() }
-            echo "🔍 Fichiers modifiés : ${changedFiles}"
-          } catch (Exception e) {
-            echo "⚠️ Erreur détection changements : ${e.getMessage()}"
-          }
-
-          // Services affectés
-          def services = env.SERVICES.split(',').collect { it.trim() } as Set
-          def affectedServices = services.findAll { service ->
-            changedFiles.any { file -> file.startsWith("${service}/") }
-          } as Set
-
-          // Ajouter ceux en échec précédemment
-          if (buildState.previousState?.services instanceof Map) {
-            def previouslyFailed = buildState.previousState.services.findAll { k, v ->
-              v?.status == 'FAILURE'
-            }?.keySet()
-            affectedServices.addAll(previouslyFailed)
-          }
-
-          echo "🚀 Services à builder : ${affectedServices}"
-          env.AFFECTED_SERVICES = affectedServices.join(',')
-        }
-      }
-    }
-
-    stage('Build Microservices') {
-      steps {
-        script {
-          def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }.findAll { it }
-
-          if (servicesToBuild.isEmpty()) {
-            echo "ℹ️ Aucun service à builder"
-          } else {
-            servicesToBuild.each { service ->
-              echo "🚀 Déclenchement du job pour ${service}"
-              def buildResult = build job: "${service}/main",
-                                     wait: true,
-                                     propagate: false,
-                                     parameters: []
-
-              echo "🔎 Résultat ${service} : ${buildResult.result}"
-
-              buildResults[service] = buildResult.result
-              buildState.services[service] = [
-                status: buildResult.result,
-                buildNumber: buildResult.number,
-                buildUrl: buildResult.absoluteUrl,
-                timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-              ]
-            }
-          }
-
-          try {
-            def jsonContent = groovy.json.JsonOutput.prettyPrint(
-              groovy.json.JsonOutput.toJson(buildState)
-            )
-            writeFile file: env.BUILD_STATE_FILE, text: jsonContent
-            echo "✅ État sauvegardé dans ${env.BUILD_STATE_FILE}"
-          } catch (Exception e) {
-            echo "❌ Erreur écriture état : ${e.getMessage()}"
-          }
         }
       }
     }
   }
 
-  post {
+  /*post {
     failure {
       echo "❌ Pipeline orchestrateur échoué."
     }
