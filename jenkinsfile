@@ -36,7 +36,7 @@ pipeline {
                 previousFailures << parts[0]
               }
             }
-            echo "⚠️ Services échoués précédemment : ${previousFailures}"
+            echo "⚠️ Services échoués précédemmentt : ${previousFailures}"
           } else {
             echo "ℹ️ Aucun fichier d'état trouvé"
           }
