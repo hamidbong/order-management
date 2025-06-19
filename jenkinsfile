@@ -34,7 +34,7 @@ pipeline {
           buildState.services = [:]
           buildState.previousState = [:]
 
-          // Chargement état précédent
+          // Chargement de l'état précédent
           if (fileExists(env.BUILD_STATE_FILE)) {
             try {
               def content = readFile(env.BUILD_STATE_FILE).trim()
@@ -68,16 +68,16 @@ pipeline {
             ).trim().split('\n').findAll { it.trim() }
             echo "🔍 Fichiers modifiés : ${changedFiles}"
           } catch (Exception e) {
-            echo "⚠️ Erreurs détection changements : ${e.getMessage()}"
+            echo "⚠️ Erreur détection changements : ${e.getMessage()}"
           }
 
-          // Détermination des services à builder
+          // Détection des services affectés
           def services = env.SERVICES.split(',').collect { it.trim() } as Set
           def affectedServices = services.findAll { service ->
             changedFiles.any { file -> file.startsWith("${service}/") }
           } as Set
 
-          // Ajouter ceux en échec précédemment
+          // Ajouter les services échoués précédemment
           if (buildState.previousState?.services instanceof Map) {
             def previouslyFailed = buildState.previousState.services.findAll { k, v ->
               v?.status == 'FAILURE'
@@ -106,7 +106,7 @@ pipeline {
                                      propagate: false,
                                      parameters: []
 
-              def result = "${buildResult.result}" // String only
+              def result = "${buildResult.result}" // Sécurisé
               echo "🔎 Résultat ${service} : ${result}"
 
               buildResults[service] = result
@@ -120,7 +120,12 @@ pipeline {
             }
           }
 
-          // Sauvegarde état
+          // ✅ Copier les services actuels dans previousState pour la prochaine exécution
+          buildState.previousState = [
+            services: buildState.services
+          ]
+
+          // Sauvegarde de l'état
           try {
             def jsonContent = groovy.json.JsonOutput.prettyPrint(
               groovy.json.JsonOutput.toJson(buildState)
