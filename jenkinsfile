@@ -194,6 +194,7 @@ pipeline {
             try {
               def jsonContent = groovy.json.JsonOutput.prettyPrint(
                 groovy.json.JsonOutput.toJson(buildData.state)
+              )
               writeFile file: env.BUILD_STATE_FILE, text: jsonContent
               echo "✅ État sauvegardé dans ${env.BUILD_STATE_FILE}"
             } catch (Exception e) {
