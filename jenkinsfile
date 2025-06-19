@@ -1,5 +1,5 @@
 def buildResults = [:]
-def buildState = [:]
+//def buildState = [:]
 
 pipeline {
   agent any
@@ -12,6 +12,7 @@ pipeline {
     stage('Préparation') {
       steps {
         script {
+          def buildState = [:]  // Déclarée ici uniquement
           try {
             step([
               $class: 'CopyArtifact',
