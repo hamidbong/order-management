@@ -1,6 +1,3 @@
-def buildResults = [:]
-def buildState = [:]
-
 pipeline {
   agent any
   environment {
@@ -13,13 +10,15 @@ pipeline {
       steps {
         script {
           // Initialisation des structures de données
-          buildState.branch = env.BRANCH_NAME
-          buildState.buildNumber = env.BUILD_NUMBER
-          buildState.buildUrl = env.BUILD_URL
-          buildState.timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-          buildState.services = [:]
-          buildState.previousState = [:]
-
+          def buildResults = [:]
+          def buildState = [
+            branch: env.BRANCH_NAME,
+            buildNumber: env.BUILD_NUMBER,
+            buildUrl: env.BUILD_URL,
+            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+            services: [:],
+            previousState: [:]
+          ]
 
           // 1. Récupération de l'état précédent
           try {
@@ -101,8 +100,8 @@ pipeline {
           }
 
           // Sauvegarde des données pour les étapes suivantes
-          currentBuild.buildResults = buildResults
-          currentBuild.buildState = buildState
+          env.buildResults = groovy.json.JsonOutput.toJson(buildResults)
+          env.buildState = groovy.json.JsonOutput.toJson(buildState)
         }
       }
     }
@@ -110,17 +109,16 @@ pipeline {
     stage('Build Microservices') {
       steps {
         script {
-          def servicesToBuild = env.AFFECTED_SERVICES.split(',').collect { it.trim() }.findAll { it }
+          def buildResults = new groovy.json.JsonSlurper().parseText(env.buildResults)
+          def buildState = new groovy.json.JsonSlurper().parseText(env.buildState)
 
-          if (servicesToBuild.isEmpty()) {
-            echo "ℹ️ Aucun service à builder"
-          } else {
-            // Construction en parallèle
+          def servicesToBuild = env.AFFECTED_SERVICES?.split(',')?.collect { it.trim() }?.findAll { it } ?: []
+
+          if (servicesToBuild) {
             def builds = [:]
             servicesToBuild.each { service ->
               builds[service] = {
                 try {
-                  echo "🚀 Déclenchement du job pour ${service}"
                   def buildResult = build(
                     job: "${service}/main",
                     wait: true,
@@ -129,25 +127,22 @@ pipeline {
                     timeout: time(time: 30, unit: 'MINUTES')
                   )
                   
-                  def result = "${buildResult.result}"
-                  echo "🔎 Résultat ${service} : ${result}"
-
-                  buildResults[service] = result
+                  // Mettre à jour les résultats
+                  buildResults[service] = buildResult.result
                   buildState.services[service] = [
-                    status: result,
+                    status: buildResult.result,
                     buildNumber: buildResult.number,
                     buildUrl: buildResult.absoluteUrl,
                     timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
                   ]
                 } catch (Exception e) {
-                  echo "❌ Erreur lors du build de ${service}: ${e.message}"
                   buildResults[service] = 'FAILURE'
                   buildState.services[service] = [
                     status: 'FAILURE',
                     error: e.message,
                     timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
                   ]
-                  currentBuild.result = 'FAILURE'
+                  echo "❌ Erreur build ${service}: ${e.message}"
                 }
               }
             }
@@ -161,10 +156,9 @@ pipeline {
             }
           }
 
-          // Sauvegarde de l'état pour la prochaine exécution
-          buildState.previousState = [
-            services: buildState.services
-          ]
+          // Mettre à jour les variables dans l'environnement
+          env.buildResults = groovy.json.JsonOutput.toJson(buildResults)
+          env.buildState = groovy.json.JsonOutput.toJson(buildState)
 
           // Écriture sécurisée du fichier d'état
           lock('build-state-lock') {
@@ -192,6 +186,31 @@ pipeline {
   }
 
   post {
+    always {
+      script {
+        def buildResults = new groovy.json.JsonSlurper().parseText(env.buildResults ?: '{}')
+        def buildState = new groovy.json.JsonSlurper().parseText(env.buildState ?: '{}')
+
+        // Affichage des résultats
+        echo "📝 Résumé des builds :"
+        buildResults.each { service, result ->
+          echo "🔎 ${service} : ${result}"
+        }
+
+        // Archivage de l'état
+        try {
+          writeFile file: env.BUILD_STATE_FILE, text: groovy.json.JsonOutput.toJson(buildState)
+          archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
+        } catch (Exception e) {
+          echo "⚠️ Erreur archivage : ${e.message}"
+        }
+      }
+    }
+  }
+}
+
+
+  /*post {
     failure {
       echo "❌ Pipeline orchestrateur échoué."
     }
