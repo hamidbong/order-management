@@ -6,22 +6,36 @@ pipeline {
   }
 
   stages {
-    stage('Préparation') {
+    stage('Initialisation') {
       steps {
         script {
           // Initialisation des structures de données
-          def buildResults = [:]
-          def buildState = [
-            branch: env.BRANCH_NAME,
-            buildNumber: env.BUILD_NUMBER,
-            buildUrl: env.BUILD_URL,
-            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
-            services: [:],
-            previousState: [:]
+          def buildData = [
+            results: [:],
+            state: [
+              branch: env.BRANCH_NAME,
+              buildNumber: env.BUILD_NUMBER,
+              buildUrl: env.BUILD_URL,
+              timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+              services: [:],
+              previousState: [:]
+            ]
           ]
 
-          // 1. Récupération de l'état précédent
+          // Sauvegarde initiale des données
+          env.BUILD_DATA = groovy.json.JsonOutput.toJson(buildData)
+        }
+      }
+    }
+
+    stage('Récupération état précédent') {
+      steps {
+        script {
+          // Récupération des données
+          def buildData = new groovy.json.JsonSlurper().parseText(env.BUILD_DATA)
+
           try {
+            // Tentative de récupération de l'état précédent
             step([
               $class: 'CopyArtifact',
               projectName: env.JOB_NAME,
@@ -31,148 +45,154 @@ pipeline {
               flatten: true
             ])
             echo "✅ Artefact récupéré avec succès"
+
+            if (fileExists(env.BUILD_STATE_FILE)) {
+              def content = readFile(env.BUILD_STATE_FILE).trim()
+              if (content && !content.allWhitespace) {
+                def previousState = new groovy.json.JsonSlurper().parseText(content)
+                buildData.state.previousState = previousState.previousState ?: [:]
+                echo "✅ État précédent chargé"
+              }
+            }
           } catch (Exception e) {
             echo "⚠️ Impossible de restaurer l'artefact : ${e.message}"
           }
 
-          // 2. Lecture de l'état précédent
-          if (fileExists(env.BUILD_STATE_FILE)) {
-            try {
-              def content = readFile(env.BUILD_STATE_FILE).trim()
-              if (content && !content.allWhitespace) {
-                echo "Contenu précédent:\n${content}"
-                def parsed = new groovy.json.JsonSlurper().parseText(content)
-                // Deep copy pour éviter les modifications accidentelles
-                buildState.previousState = new groovy.json.JsonSlurper().parseText(
-                  groovy.json.JsonOutput.toJson(parsed.previousState ?: [:])
-                )
-                echo "✅ État précédent chargé"
-              } else {
-                echo "⚠️ Fichier d'état vide"
-              }
-            } catch (Exception e) {
-              echo "⚠️ Erreur parsing JSON : ${e.getMessage()}"
-              currentBuild.result = 'UNSTABLE'
-            }
-          } else {
-            echo "ℹ️ Aucun fichier d'état trouvé"
-          }
+          // Mise à jour des données
+          env.BUILD_DATA = groovy.json.JsonOutput.toJson(buildData)
+        }
+      }
+    }
 
-          // 3. Détection sécurisée des fichiers changés
+    stage('Détection changements') {
+      steps {
+        script {
+          def buildData = new groovy.json.JsonSlurper().parseText(env.BUILD_DATA)
           def changedFiles = []
+
           try {
-            def gitPrevious = sh(script: 'git rev-parse HEAD~1 2>/dev/null || echo HEAD', returnStdout: true).trim()
-            def gitCurrent = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-            def diffOutput = sh(
-              script: "git diff --name-only ${gitPrevious} ${gitCurrent} || echo ''",
+            // Détection des fichiers modifiés
+            def gitPrevious = sh(
+              script: 'git rev-parse HEAD~1 2>/dev/null || echo HEAD',
               returnStdout: true
             ).trim()
-            changedFiles = diffOutput ? diffOutput.split('\n').findAll { it.trim() } : []
-            echo "🔍 Fichiers modifiés : ${changedFiles}"
+            
+            def gitCurrent = sh(
+              script: 'git rev-parse HEAD',
+              returnStdout: true
+            ).trim()
+            
+            changedFiles = sh(
+              script: "git diff --name-only ${gitPrevious} ${gitCurrent} || echo ''",
+              returnStdout: true
+            ).trim().split('\n').findAll { it.trim() }
+
+            echo "🔍 Fichiers modifiés détectés: ${changedFiles.size()}"
           } catch (Exception e) {
-            echo "⚠️ Erreur détection changements : ${e.getMessage()}"
+            echo "⚠️ Erreur détection changements : ${e.message}"
             currentBuild.result = 'UNSTABLE'
-            changedFiles = []
           }
 
-          // 4. Sélection sécurisée des services à builder
-          def affectedServices = []
+          // Détermination des services affectés
           try {
             def services = env.SERVICES.split(',').collect { it.trim() }.findAll { it }
-            affectedServices = services.findAll { service ->
+            def affectedServices = services.findAll { service ->
               changedFiles.any { file -> file.startsWith("${service}/") }
             } as Set
 
             // Ajout des services précédemment en échec
-            if (buildState.previousState?.services instanceof Map) {
-              def previouslyFailed = buildState.previousState.services.findAll { k, v ->
+            if (buildData.state.previousState?.services instanceof Map) {
+              def previouslyFailed = buildData.state.previousState.services.findAll { k, v ->
                 v?.status == 'FAILURE'
               }?.keySet()
               affectedServices.addAll(previouslyFailed ?: [])
             }
 
-            echo "🚀 Services à builder : ${affectedServices}"
             env.AFFECTED_SERVICES = affectedServices.join(',')
+            echo "🚀 Services à builder: ${affectedServices}"
           } catch (Exception e) {
             echo "⚠️ Erreur calcul services : ${e.message}"
             currentBuild.result = 'UNSTABLE'
             env.AFFECTED_SERVICES = ''
           }
 
-          // Sauvegarde des données pour les étapes suivantes
-          env.buildResults = groovy.json.JsonOutput.toJson(buildResults)
-          env.buildState = groovy.json.JsonOutput.toJson(buildState)
+          env.BUILD_DATA = groovy.json.JsonOutput.toJson(buildData)
         }
       }
     }
 
-    stage('Build Microservices') {
+    stage('Construction des services') {
       steps {
         script {
-          def buildResults = new groovy.json.JsonSlurper().parseText(env.buildResults)
-          def buildState = new groovy.json.JsonSlurper().parseText(env.buildState)
-
+          def buildData = new groovy.json.JsonSlurper().parseText(env.BUILD_DATA)
           def servicesToBuild = env.AFFECTED_SERVICES?.split(',')?.collect { it.trim() }?.findAll { it } ?: []
 
-          if (servicesToBuild) {
-            def builds = [:]
+          if (servicesToBuild.isEmpty()) {
+            echo "ℹ️ Aucun service à builder"
+          } else {
+            // Construction en parallèle
+            def parallelStages = [:]
+            
             servicesToBuild.each { service ->
-              builds[service] = {
+              parallelStages["Build ${service}"] = {
                 try {
+                  echo "🚀 Démarrage build pour ${service}"
+                  
                   def buildResult = build(
                     job: "${service}/main",
                     wait: true,
                     propagate: false,
                     parameters: [],
                     timeout: time(time: 30, unit: 'MINUTES')
-                  )
                   
-                  // Mettre à jour les résultats
-                  buildResults[service] = buildResult.result
-                  buildState.services[service] = [
+                  // Enregistrement des résultats
+                  buildData.results[service] = buildResult.result
+                  buildData.state.services[service] = [
                     status: buildResult.result,
                     buildNumber: buildResult.number,
                     buildUrl: buildResult.absoluteUrl,
                     timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
                   ]
+                  
+                  echo "🔎 Résultat ${service}: ${buildResult.result}"
                 } catch (Exception e) {
-                  buildResults[service] = 'FAILURE'
-                  buildState.services[service] = [
+                  buildData.results[service] = 'FAILURE'
+                  buildData.state.services[service] = [
                     status: 'FAILURE',
                     error: e.message,
                     timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
                   ]
                   echo "❌ Erreur build ${service}: ${e.message}"
+                  currentBuild.result = 'FAILURE'
                 }
               }
             }
             
-            // Exécution en parallèle avec gestion des erreurs
-            try {
-              parallel builds
-            } catch (Exception e) {
-              echo "⚠️ Erreur dans l'exécution parallèle : ${e.message}"
-              currentBuild.result = 'FAILURE'
-            }
+            // Exécution parallèle
+            parallel parallelStages
           }
 
-          // Mettre à jour les variables dans l'environnement
-          env.buildResults = groovy.json.JsonOutput.toJson(buildResults)
-          env.buildState = groovy.json.JsonOutput.toJson(buildState)
+          // Préparation pour la prochaine exécution
+          buildData.state.previousState = [
+            services: buildData.state.services
+          ]
 
-          // Écriture sécurisée du fichier d'état
+          // Sauvegarde des données
+          env.BUILD_DATA = groovy.json.JsonOutput.toJson(buildData)
+        }
+      }
+    }
+
+    stage('Sauvegarde état') {
+      steps {
+        script {
+          def buildData = new groovy.json.JsonSlurper().parseText(env.BUILD_DATA)
+
+          // Sauvegarde thread-safe de l'état
           lock('build-state-lock') {
             try {
               def jsonContent = groovy.json.JsonOutput.prettyPrint(
-                groovy.json.JsonOutput.toJson([
-                  branch: buildState.branch,
-                  buildNumber: buildState.buildNumber,
-                  buildUrl: buildState.buildUrl,
-                  timestamp: buildState.timestamp,
-                  services: buildState.services,
-                  previousState: buildState.previousState
-                ])
-              )
+                groovy.json.JsonOutput.toJson(buildData.state)
               writeFile file: env.BUILD_STATE_FILE, text: jsonContent
               echo "✅ État sauvegardé dans ${env.BUILD_STATE_FILE}"
             } catch (Exception e) {
@@ -188,69 +208,32 @@ pipeline {
   post {
     always {
       script {
-        def buildResults = new groovy.json.JsonSlurper().parseText(env.buildResults ?: '{}')
-        def buildState = new groovy.json.JsonSlurper().parseText(env.buildState ?: '{}')
+        def buildData = new groovy.json.JsonSlurper().parseText(env.BUILD_DATA ?: '{}')
 
-        // Affichage des résultats
-        echo "📝 Résumé des builds :"
-        buildResults.each { service, result ->
-          echo "🔎 ${service} : ${result}"
-        }
-
-        // Archivage de l'état
+        // Archivage des artefacts
         try {
-          writeFile file: env.BUILD_STATE_FILE, text: groovy.json.JsonOutput.toJson(buildState)
           archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
         } catch (Exception e) {
           echo "⚠️ Erreur archivage : ${e.message}"
         }
-      }
-    }
-  }
-}
 
-
-  /*post {
-    failure {
-      echo "❌ Pipeline orchestrateur échoué."
-    }
-    unstable {
-      echo "⚠️ Pipeline orchestrateur instable (certaines étapes ont eu des problèmes)."
-    }
-    always {
-      script {
-        // Archivage sécurisé de l'artefact
-        try {
-          archiveArtifacts artifacts: env.BUILD_STATE_FILE, fingerprint: true
-        } catch (Exception e) {
-          echo "⚠️ Erreur lors de l'archivage : ${e.message}"
-        }
-
-        // Affichage du résumé
-        def buildResults = currentBuild.buildResults ?: [:]
+        // Rapport des résultats
         echo "📝 Résumé des builds :"
-        if (buildResults instanceof Map && !buildResults.isEmpty()) {
-          buildResults.each { service, result ->
+        if (buildData.results) {
+          buildData.results.each { service, result ->
             echo "🔎 ${service} : ${result}"
           }
 
-          def successCount = buildResults.count { k, v -> v == 'SUCCESS' }
-          def failureCount = buildResults.count { k, v -> v == 'FAILURE' }
-          def abortedCount = buildResults.count { k, v -> v == 'ABORTED' }
+          def stats = [
+            total: buildData.results.size(),
+            success: buildData.results.count { k, v -> v == 'SUCCESS' },
+            failure: buildData.results.count { k, v -> v == 'FAILURE' },
+            aborted: buildData.results.count { k, v -> v == 'ABORTED' }
+          ]
 
-          echo "📊 TOTAL: ${buildResults.size()}, SUCCÈS: ${successCount}, ÉCHECS: ${failureCount}, ABANDONNÉS: ${abortedCount}"
+          echo "📊 TOTAL: ${stats.total}, SUCCÈS: ${stats.success}, ÉCHECS: ${stats.failure}, ABANDONNÉS: ${stats.aborted}"
         } else {
-          echo "ℹ️ Aucun résultat de build à afficher."
-        }
-
-        // Affichage du contenu du fichier d'état
-        if (fileExists(env.BUILD_STATE_FILE)) {
-          try {
-            echo "📂 Contenu du fichier d'état :"
-            echo readFile(env.BUILD_STATE_FILE)
-          } catch (Exception e) {
-            echo "⚠️ Erreur lecture fichier d'état : ${e.message}"
-          }
+          echo "ℹ️ Aucun résultat de build à afficher"
         }
       }
     }
